@@ -12,14 +12,15 @@ import subprocess
 
 from common import plt_show, plt_show_column_grid, plt_show_grid
 from neume import NeumeGenerator
-from segmentation import get_clean_line_images, get_line_images_with_neume_count, get_neume_images
+from segmentation import get_line_images, get_line_images_with_neume_count, get_neume_images
 
 NEUMES_PER_PAGE = 205
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--seed', type=int, default=None, help='seed (default: None)')
-argparser.add_argument('--dataset', type=str, default='raw', help='data to generate: raw|pickle (default: raw)')
-argparser.add_argument('--use_dataset', type=str, default=None, help='raw dataset to generate pickle dataset')
+argparser.add_argument('--type', type=str, default='raw', help='dataset type to generate: raw|bin (default: raw)')
+argparser.add_argument('--output_basename', type=str, default='dataset', help='output directory|file basename (depends on the type)')
+argparser.add_argument('--use_dataset', type=str, default=None, help='raw dataset to generate bin dataset')
 argparser.add_argument('--pages', type=int, default=10_000, help='number of pages to be generated for the raw dataset)')
 argparser.add_argument('--augment', action='store_true', help='use per page augmentation')
 argparser.add_argument('--augment_mult', type=int, default=10, help='augmentation multiplicator (augmentations per original)')
@@ -49,37 +50,37 @@ def convert(document_path: str, output_dir: str):
         page.save(os.path.join(output_dir, f'{i + 1}.png'), 'PNG')
 
 def match_raw_data(dataset_path: str, augmentation_multiplier: int):
+    examples_path = 'intermediate_result_examples/page_augmentation'
+
     transform = A.Compose((
+        A.Rotate(angle_range=(-3, 3), p=0.5, crop_border=True),
         A.ElasticTransform(alpha=3, sigma=40),
         A.GridDistortion(num_steps=7, distort_range=(-0.5, 0.5)),
         A.OpticalDistortion(distort_range=(-0.05, 0.05)),
-        A.Rotate(angle_range=(-3, 3), p=0.5),
         A.GridElasticDeform(num_grid_xy=(16, 16), magnitude=3)
     ))
 
     fns = os.listdir(dataset_path)
-    for fn in fns:
-        if fn.endswith('.png'):
+    img_fns = [fn for fn in fns if fn.endswith('.png')]
+    
+    with tqdm(img_fns) as pbar:
+        for fn in pbar:
+            name = fn.replace('.png', '')
             page_img = cv2.imread(os.path.join(dataset_path, fn))
             line_imgs, neume_counts = get_line_images_with_neume_count(page_img)
-            aug_page_imgs = []
             for i in range(augmentation_multiplier):
                 transformed = transform(image=page_img)
                 transformed_image = transformed['image']
-                transformed_line_imgs = get_clean_line_images(transformed_image)
-                num_lines = len(transformed_line_imgs)
-                print(num_lines)
-                plt_show_column_grid(transformed_line_imgs, list(map(str, range(1, num_lines + 1))), 2)
-            break
+                cv2.imwrite(os.path.join(examples_path, f'{name}_augmentation_{i}.png'), transformed_image)
 
 
 def main(args):
     dataset_path = args.use_dataset
 
     if dataset_path is None:
-        filename = 'dataset.tex'
+        filename = f'{args.output_basename}.tex'
         tex_path = os.path.join(os.path.dirname(__file__), filename)
-        outdir_path = os.path.join(os.path.dirname(__file__), 'dataset')
+        outdir_path = os.path.join(os.path.dirname(__file__), args.output_basename)
         label_path = os.path.join(outdir_path, 'labels.txt')
         os.makedirs(outdir_path, exist_ok=True)
 

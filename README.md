@@ -6,11 +6,12 @@ The project is a WIP and the README serves rather as a roadmap than a documentat
 
 ## The Byz
 
-This project is inspired by the [Neanes](https://github.com/neanes/neanes) and its complementary projects.
+This project is inspired by the [Neanes](https://github.com/neanes/neanes) project and its complementary projects.
 
 The original idea was to use Neanes to generate dataset that could be later augmented in order to train a model.
 Due to the design of Neanes application (which is a WYSIWYG editor for sheet score-writting)
 full automatization of synthesis process is very diffucult if not nearly impossible and it requires a graphical runtime.
+Besides, when generating the data automatically, Neanes incorrectly handles the typesetting of large subset of neumes.
 
 Therefore I took the Neanes font (`byztex/Neanes.otf`),
 which follows the SBMuFL standard, proposed by the Neanes team, and I created few basic LuaLatex templates
@@ -27,7 +28,7 @@ The toolkit consits of 3 main programs that essentially form a toolchain:
 
 ### Dataset synthetiser
 
-The dataset synthetiser works in 2 main operations modes.
+The dataset synthetiser works in 2 main operation modes.
 
 - raw dataset synthesis
 - binary dataset synthesis

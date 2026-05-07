@@ -1,8 +1,6 @@
 import cv2
 import numpy as np
 
-from edit import crop_margin, clear_crop
-
 def line_y_bounds(img: cv2.Mat):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -104,12 +102,6 @@ def get_line_images(img: cv2.Mat):
 
     return line_imgs
 
-def get_clean_line_images(img: cv2.Mat) -> list:
-    cropped = crop_margin(img)
-    lines = get_line_images(cropped)
-    imgs = [clear_crop(line) for line in lines]
-    return imgs
-
 def get_neume_images(line_img: cv2.Mat) -> list:
     imgs = []
     neume_bounds = neume_x_bounds(line_img)
@@ -122,6 +114,6 @@ def count_neume_images(line_img: cv2.Mat) -> int:
     return len(neume_x_bounds(line_img))
 
 def get_line_images_with_neume_count(img: cv2.Mat) -> (list, list):
-    line_imgs = get_clean_line_images(img)
+    line_imgs = get_line_images(img)
     neume_counts = [count_neume_images(line) for line in line_imgs]
     return line_imgs, neume_counts
