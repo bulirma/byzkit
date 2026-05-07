@@ -1,0 +1,130 @@
+\documentclass[16pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{fontspec}
+\usepackage{newunicodechar}
+\usepackage[letterspace=200]{microtype}
+\usepackage{xcolor}
+
+\newfontfamily\symbolfont{Neanes.otf}
+
+%quantitative
+\providecommand\Nison{{\symbolfont\symbol{"E000}}}
+\providecommand\Noligon{{\symbolfont\symbol{"E001}}}
+\providecommand\NoligonKentimataMiddle{{\symbolfont\symbol{"E002}}}
+\providecommand\NoligonKentimaBelow{{\symbolfont\symbol{"E003}}}
+\providecommand\NoligonKentimaAbove{{\symbolfont\symbol{"E004}}}
+\providecommand\NoligonYpsiliRight{{\symbolfont\symbol{"E005}}}
+\providecommand\NoligonYpsiliLeft{{\symbolfont\symbol{"E006}}}
+\providecommand\NoligonKentimaYpsiliRight{{\symbolfont\symbol{"E007}}}
+\providecommand\NoligonKentimaYpsiliMiddle{{\symbolfont\symbol{"E008}}}
+\providecommand\NoligonDoubleYpsili{{\symbolfont\symbol{"E009}}}
+\providecommand\NoligonKentimataDoubleYpsili{{\symbolfont\symbol{"E00A}}}
+\providecommand\NoligonKentimaDoubleYpsiliRight{{\symbolfont\symbol{"E00B}}}
+\providecommand\NoligonKentimaDoubleYpsiliLeft{{\symbolfont\symbol{"E00C}}}
+\providecommand\NoligonTripleYpsili{{\symbolfont\symbol{"E00D}}}
+\providecommand\NoligonKentimataTripleYpsili{{\symbolfont\symbol{"E00E}}}
+\providecommand\NoligonKentimaTripleYpsili{{\symbolfont\symbol{"E00F}}}
+\providecommand\NoligonIson{{\symbolfont\symbol{"E010}}}
+\providecommand\NoligonApostrofos{{\symbolfont\symbol{"E011}}}
+\providecommand\NoligonYporroi{{\symbolfont\symbol{"E012}}}
+\providecommand\NoligonElafron{{\symbolfont\symbol{"E013}}}
+\providecommand\NoligonElafronApostrofos{{\symbolfont\symbol{"E014}}}
+\providecommand\NoligonChamili{{\symbolfont\symbol{"E015}}}
+\providecommand\NisonApostrofos{{\symbolfont\symbol{"E020}}}
+\providecommand\Napostrofos{{\symbolfont\symbol{"E021}}}
+\providecommand\NapostrofosSyndesmos{{\symbolfont\symbol{"E022}}}
+\providecommand\Nyporroi{{\symbolfont\symbol{"E023}}}
+\providecommand\Nelafron{{\symbolfont\symbol{"E024}}}
+\providecommand\NrunningElafron{{\symbolfont\symbol{"E025}}}
+\providecommand\NelafronApostrofos{{\symbolfont\symbol{"E026}}}
+\providecommand\Nchamili{{\symbolfont\symbol{"E027}}}
+\providecommand\NchamiliApostrofos{{\symbolfont\symbol{"E028}}}
+\providecommand\NchamiliElafron{{\symbolfont\symbol{"E029}}}
+\providecommand\NchamiliElafronApostrofos{{\symbolfont\symbol{"E02A}}}
+\providecommand\NdoubleChamili{{\symbolfont\symbol{"E02B}}}
+\providecommand\NdoubleChamiliApostrofos{{\symbolfont\symbol{"E02C}}}
+\providecommand\NdoubleChamiliElafron{{\symbolfont\symbol{"E02D}}}
+\providecommand\NdoubleChamiliElafronApostrofos{{\symbolfont\symbol{"E02E}}}
+\providecommand\NtripleChamili{{\symbolfont\symbol{"E02F}}}
+\providecommand\NpetastiIson{{\symbolfont\symbol{"E040}}}
+\providecommand\Npetasti{{\symbolfont\symbol{"E041}}}
+\providecommand\NpetastiOligon{{\symbolfont\symbol{"E042}}}
+\providecommand\NpetastiKentima{{\symbolfont\symbol{"E043}}}
+\providecommand\NpetastiYpsiliRight{{\symbolfont\symbol{"E044}}}
+\providecommand\NpetastiYpsiliLeft{{\symbolfont\symbol{"E045}}}
+\providecommand\NpetastiKentimaYpsiliRight{{\symbolfont\symbol{"E046}}}
+\providecommand\NpetastiKentimaYpsiliMiddle{{\symbolfont\symbol{"E047}}}
+\providecommand\NpetastiDoubleYpsili{{\symbolfont\symbol{"E048}}}
+\providecommand\NpetastiKentimataDoubleYpsili{{\symbolfont\symbol{"E049}}}
+\providecommand\NpetastiKentimaDoubleYpsiliRight{{\symbolfont\symbol{"E04A}}}
+\providecommand\NpetastiKentimaDoubleYpsiliLeft{{\symbolfont\symbol{"E04B}}}
+\providecommand\NpetastiTripleYpsili{{\symbolfont\symbol{"E04C}}}
+\providecommand\NpetastiKentimataTripleYpsili{{\symbolfont\symbol{"E04D}}}
+\providecommand\NpetastiKentimaTripleYpsili{{\symbolfont\symbol{"E04E}}}
+\providecommand\NpetastiApostrofos{{\symbolfont\symbol{"E060}}}
+\providecommand\NpetastiYporroi{{\symbolfont\symbol{"E061}}}
+\providecommand\NpetastiElafron{{\symbolfont\symbol{"E062}}}
+\providecommand\NpetastiRunningElafron{{\symbolfont\symbol{"E063}}}
+\providecommand\NpetastiElafronApostrofos{{\symbolfont\symbol{"E064}}}
+\providecommand\NpetastiChamili{{\symbolfont\symbol{"E065}}}
+\providecommand\NpetastiChamiliApostrofos{{\symbolfont\symbol{"E066}}}
+\providecommand\NpetastiChamiliElafron{{\symbolfont\symbol{"E067}}}
+\providecommand\NpetastiChamiliElafronApostrofos{{\symbolfont\symbol{"E068}}}
+\providecommand\NpetastiDoubleChamili{{\symbolfont\symbol{"E069}}}
+\providecommand\NpetastiDoubleChamiliApostrofos{{\symbolfont\symbol{"E06A}}}
+\providecommand\Nkentima{{\symbolfont\symbol{"E080}}}
+\providecommand\Nkentimata{{\symbolfont\symbol{"E081}}}
+\providecommand\NoligonKentimataBelow{{\symbolfont\symbol{"E082}}}
+\providecommand\NoligonKentimataAbove{{\symbolfont\symbol{"E083}}}
+\providecommand\NoligonIsonKentimata{{\symbolfont\symbol{"E084}}}
+\providecommand\NoligonKentimaMiddleKentimata{{\symbolfont\symbol{"E085}}}
+\providecommand\NoligonYpsiliRightKentimata{{\symbolfont\symbol{"E086}}}
+\providecommand\NoligonYpsiliLeftKentimata{{\symbolfont\symbol{"E087}}}
+\providecommand\NoligonApostrofosKentimata{{\symbolfont\symbol{"E088}}}
+\providecommand\NoligonYporroiKentimata{{\symbolfont\symbol{"E089}}}
+\providecommand\NoligonElafronKentimata{{\symbolfont\symbol{"E08A}}}
+\providecommand\NoligonRunningElafronKentimata{{\symbolfont\symbol{"E08B}}}
+\providecommand\NoligonElafronApostrofosKentimata{{\symbolfont\symbol{"E08C}}}
+\providecommand\NoligonChamiliKentimata{{\symbolfont\symbol{"E08D}}}
+
+% rhythm
+\providecommand\NbarlineSingle{\textcolor{red}{\symbolfont\symbol{"E210}}}
+\providecommand\NbarlineDouble{\textcolor{red}{\symbolfont\symbol{"E211}}}
+\providecommand\NbarlineTheseos{\textcolor{red}{\symbolfont\symbol{"E212}}}
+\providecommand\NbarlineShortSingle{\textcolor{red}{\symbolfont\symbol{"E213}}}
+\providecommand\NbarlineShortDouble{\textcolor{red}{\symbolfont\symbol{"E214}}}
+\providecommand\NbarlineShortTheseos{\textcolor{red}{\symbolfont\symbol{"E215}}}
+
+
+% page style
+\setlength{\parindent}{0pt}
+\linespread{3.5}\selectfont
+\AtBeginDocument{
+    \fontsize{16pt}{16pt}\selectfont
+}
+\pagestyle{empty}
+
+% line breaking
+\hyphenchar\font=-1
+\hyphenpenalty=10000
+\exhyphenpenalty=10000
+\tolerance=2000
+\emergencystretch=1em
+
+\newcommand{\breakablechars}[1]{
+    \begingroup\lccode`~=`\^^M
+    \mathcode`~="8000\relax
+    \edef\temp{}
+    \def\do##1{\edef\temp{\temp##1\allowbreak}}
+    \edef\processme{\noexpand\docsvlist{#1}}
+    \expandafter\processme\expandafter
+    \endgroup
+    \temp
+}
+
+\begin{document}
+
+\lsstyle
+
+\end{document}
