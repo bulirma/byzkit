@@ -1,20 +1,26 @@
 import albumentations as A
 import cv2
+import numpy as np
 from pdf2image import convert_from_path
+import torch
+from torch.utils.data import Dataset
 from tqdm import tqdm
 
 import argparse
 import lzma
-import pickle
 import os
+import pickle
 import sys
 import subprocess
 
 from common import plt_show, plt_show_column_grid, plt_show_grid
-from neume import NeumeGenerator
+from img import symmetric_pad
+from neume import NeumeGenerator, load_classes
 from segmentation import get_line_images, get_line_images_with_neume_count, get_neume_images
 
+
 NEUMES_PER_PAGE = 205
+LABELS_FILE_NAME = 'labels.txt'
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--seed', type=int, default=None, help='seed (default: None)')
@@ -24,7 +30,20 @@ argparser.add_argument('--use_dataset', type=str, default=None, help='raw datase
 argparser.add_argument('--pages', type=int, default=10_000, help='number of pages to be generated for the raw dataset)')
 argparser.add_argument('--augment', action='store_true', help='use per page augmentation')
 argparser.add_argument('--augment_mult', type=int, default=10, help='augmentation multiplicator (augmentations per original)')
-argparser.add_argument('--split', type=str, default=None, help='split of pickle dataset (fmt: train|dev or tran|dev|validation')
+argparser.add_argument('--split', type=str, default=None, help='split of pickle dataset (fmt: train|dev or train|dev|val')
+
+
+class SimpleDataset(Dataset):
+    def __init__(self, data, targets):
+        super().__init__()
+        self.data = data
+        self.targets = targets
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx], self.targets[idx]
 
 
 def init_document(document_path: str):
@@ -49,7 +68,11 @@ def convert(document_path: str, output_dir: str):
     for i, page in enumerate(pages):
         page.save(os.path.join(output_dir, f'{i + 1}.png'), 'PNG')
 
-def match_raw_data(dataset_path: str, augmentation_multiplier: int):
+def get_neume_map():
+    classes = load_classes()
+    return { c: i for i, c in enumerate(classes) }
+
+def gen_augmentation_examples(dataset_path: str, augmentation_multiplier: int):
     examples_path = 'intermediate_result_examples/page_augmentation'
 
     transform = A.Compose((
@@ -73,6 +96,39 @@ def match_raw_data(dataset_path: str, augmentation_multiplier: int):
                 transformed_image = transformed['image']
                 cv2.imwrite(os.path.join(examples_path, f'{name}_augmentation_{i}.png'), transformed_image)
 
+def match_raw_data(dataset_path: str, augmentation_multiplier: int, label_map: dict):
+    labels_path = os.path.join(dataset_path, LABELS_FILE_NAME)
+    fns = os.listdir(dataset_path)
+    img_fns = [fn for fn in fns if fn.endswith('.png')]
+
+    max_height = 0
+
+    all_line_imgs = []
+    all_line_labels = []
+    
+    with tqdm(img_fns) as pbar, open(labels_path, 'r') as lf:
+        for fn in pbar:
+            #name = fn.replace('.png', '')
+            page_img = cv2.imread(os.path.join(dataset_path, fn))
+            line_imgs, neume_counts = get_line_images_with_neume_count(page_img)
+            page_max_height = max(map(lambda img: img.shape[0], line_imgs))
+            if page_max_height > max_height:
+                max_height = page_max_height
+            for count in neume_counts:
+                line_labels = []
+                for _ in range(count):
+                    line = lf.readline().strip()
+                    if line == '':
+                        continue
+                    line_labels.append(label_map[line])
+                all_line_labels.append(line_labels)
+            all_line_imgs += line_imgs
+
+    data = [symmetric_pad(img, axis=0, size=max_height, value=255) for img in all_line_imgs]
+    data = [torch.from_numpy(img) for img in data]
+    labels = [torch.tensor(line_labels, dtype=torch.uint16) for line_labels in all_line_labels]
+    return data, labels
+
 
 def main(args):
     dataset_path = args.use_dataset
@@ -81,7 +137,7 @@ def main(args):
         filename = f'{args.output_basename}.tex'
         tex_path = os.path.join(os.path.dirname(__file__), filename)
         outdir_path = os.path.join(os.path.dirname(__file__), args.output_basename)
-        label_path = os.path.join(outdir_path, 'labels.txt')
+        label_path = os.path.join(outdir_path, LABELS_FILE_NAME)
         os.makedirs(outdir_path, exist_ok=True)
 
         init_document(tex_path)
@@ -114,7 +170,44 @@ def main(args):
         print('dataset directory does not exist', file=sys.stderr)
         exit(1)
 
-    match_raw_data(dataset_path, args.augment_mult)
+    if args.split is not None:
+        split_args = args.split.split('|')
+        if len(split_args) not in (2, 3):
+            print('incorrect number of split arguments')
+            exit(1)
+        if any(map(lambda arg: not arg.isnumeric(), split_args)):
+            print('split arguments must be non-negative integers')
+            exit(1)
+        split = tuple(map(int, split_args))
+
+    target_map = get_neume_map()
+    data, targets = match_raw_data(dataset_path, args.augment_mult, target_map)
+
+    dev = None
+    val = None
+
+    if args.split is None:
+        train = SimpleDataset(data, targets)
+    else:
+        denom = len(data) // sum(split)
+        cumulative_split = []
+        for nom in split:
+            last = 0 if len(cumulative_split) == 0 else cumulative_split[-1]
+            cumulative_split.append(denom * nom + last)
+        train = SimpleDataset(data[:cumulative_split[0]], targets[:cumulative_split[0]])
+        dev = SimpleDataset(data[cumulative_split[0]: cumulative_split[1]], targets[cumulative_split[0]: cumulative_split[1]])
+        if len(cumulative_split) == 3:
+            val = SimpleDataset(data[cumulative_split[1]: cumulative_split[2]], targets[cumulative_split[1]: cumulative_split[2]])
+
+    dataset_obj = {
+        'train': train,
+        'dev': dev,
+        'val': val,
+        'label_map': target_map
+    }
+
+    with lzma.open(args.output_basename + '.pklz', 'wb') as f:
+        pickle.dump(dataset_obj, f)
 
 
 if __name__ == '__main__':
