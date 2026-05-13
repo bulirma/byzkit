@@ -17,8 +17,8 @@ def pad_batch_images(imgs, pad_value=0):
 def collate(batch):
     imgs = [b[0] for b in batch]
     targets = [b[1] for b in batch]
-    lengths = [b[1].size(0) for b in batch]
-    images_padded = pad_batch_images(imgs, pad_value=0)
+    lengths = [b[1].shape[0] for b in batch]
+    images_padded = pad_batch_images(imgs, pad_value=255)
     targets = torch.cat(targets).long()
     lengths = torch.tensor(lengths, dtype=torch.long)
     return images_padded, targets, lengths

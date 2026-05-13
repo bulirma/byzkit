@@ -36,11 +36,15 @@ def main(args: argparse.Namespace):
         dataset = pickle.load(f)
 
     train = dataset['train']
-    dev = dataset['dev']
+    test = dataset['test']
     num_classes = len(dataset['label_map'])
+    train.data = [torch.from_numpy(img).float() / 255 for img in train.data]
+    train.targets = [torch.from_numpy(target).long() for target in train.targets]
+    test.data = [torch.from_numpy(img).float() / 255 for img in test.data]
+    test.targets = [torch.from_numpy(target).long() for target in test.targets]
 
     train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, collate_fn=collate)
-    dev_loader = DataLoader(dev, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
+    test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
 
     model = models.crnn_ctc_model(num_classes, learning_rate, weight_decay)
 
@@ -48,7 +52,7 @@ def main(args: argparse.Namespace):
     logs = model.fit(args.epochs, train_loader)
     train_end = datetime.now()
 
-    result = model.evaluate(dev_loader)
+    result = model.evaluate(test_loader)
 
     model_record = {
         'model_state_dict': model.state_dict(),

@@ -20,7 +20,7 @@ from segmentation import get_line_images, get_line_images_with_neume_count, get_
 
 
 NEUMES_PER_PAGE = 205
-LABELS_FILE_NAME = 'labels.txt'
+LABELS_FILENAME = 'labels.txt'
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--seed', type=int, default=None, help='seed (default: None)')
@@ -30,7 +30,7 @@ argparser.add_argument('--use_dataset', type=str, default=None, help='raw datase
 argparser.add_argument('--pages', type=int, default=10_000, help='number of pages to be generated for the raw dataset)')
 argparser.add_argument('--augment', action='store_true', help='use per page augmentation')
 argparser.add_argument('--augment_mult', type=int, default=10, help='augmentation multiplicator (augmentations per original)')
-argparser.add_argument('--split', type=str, default=None, help='split of pickle dataset (fmt: train|dev or train|dev|val')
+argparser.add_argument('--split', type=str, default=None, help='split of pickle dataset (fmt: train|test or train|val|test')
 
 
 class SimpleDataset(Dataset):
@@ -83,13 +83,13 @@ def gen_augmentation_examples(dataset_path: str, augmentation_multiplier: int):
         A.GridElasticDeform(num_grid_xy=(16, 16), magnitude=3)
     ))
 
-    fns = os.listdir(dataset_path)
-    img_fns = [fn for fn in fns if fn.endswith('.png')]
+    filenames = os.listdir(dataset_path)
+    img_filenames = [filename for filename in filenames if filename.endswith('.png')]
     
-    with tqdm(img_fns) as pbar:
-        for fn in pbar:
-            name = fn.replace('.png', '')
-            page_img = cv2.imread(os.path.join(dataset_path, fn))
+    with tqdm(img_filenames) as pbar:
+        for filename in pbar:
+            name = filename.replace('.png', '')
+            page_img = cv2.imread(os.path.join(dataset_path, filename))
             line_imgs, neume_counts = get_line_images_with_neume_count(page_img)
             for i in range(augmentation_multiplier):
                 transformed = transform(image=page_img)
@@ -97,19 +97,19 @@ def gen_augmentation_examples(dataset_path: str, augmentation_multiplier: int):
                 cv2.imwrite(os.path.join(examples_path, f'{name}_augmentation_{i}.png'), transformed_image)
 
 def match_raw_data(dataset_path: str, augmentation_multiplier: int, label_map: dict):
-    labels_path = os.path.join(dataset_path, LABELS_FILE_NAME)
-    fns = os.listdir(dataset_path)
-    img_fns = [fn for fn in fns if fn.endswith('.png')]
+    labels_path = os.path.join(dataset_path, LABELS_FILENAME)
+    filenames = os.listdir(dataset_path)
+    img_filenames = [filename for filename in filenames if filename.endswith('.png')]
 
     max_height = 0
 
     all_line_imgs = []
     all_line_labels = []
     
-    with tqdm(img_fns) as pbar, open(labels_path, 'r') as lf:
-        for fn in pbar:
-            #name = fn.replace('.png', '')
-            page_img = cv2.imread(os.path.join(dataset_path, fn))
+    with tqdm(img_filenames) as pbar, open(labels_path, 'r') as lf:
+        for filename in pbar:
+            #name = filename.replace('.png', '')
+            page_img = cv2.imread(os.path.join(dataset_path, filename))
             line_imgs, neume_counts = get_line_images_with_neume_count(page_img)
             page_max_height = max(map(lambda img: img.shape[0], line_imgs))
             if page_max_height > max_height:
@@ -125,8 +125,7 @@ def match_raw_data(dataset_path: str, augmentation_multiplier: int, label_map: d
             all_line_imgs += line_imgs
 
     data = [symmetric_pad(img, axis=0, size=max_height, value=255) for img in all_line_imgs]
-    data = [torch.from_numpy(img) for img in data]
-    labels = [torch.tensor(line_labels, dtype=torch.uint16) for line_labels in all_line_labels]
+    labels = [np.asarray(line_labels, dtype=np.uint16) for line_labels in all_line_labels]
     return data, labels
 
 
@@ -137,7 +136,7 @@ def main(args):
         filename = f'{args.output_basename}.tex'
         tex_path = os.path.join(os.path.dirname(__file__), filename)
         outdir_path = os.path.join(os.path.dirname(__file__), args.output_basename)
-        label_path = os.path.join(outdir_path, LABELS_FILE_NAME)
+        label_path = os.path.join(outdir_path, LABELS_FILENAME)
         os.makedirs(outdir_path, exist_ok=True)
 
         init_document(tex_path)
@@ -168,23 +167,23 @@ def main(args):
 
     elif not os.path.exists(dataset_path):
         print('dataset directory does not exist', file=sys.stderr)
-        exit(1)
+        return 1
 
     if args.split is not None:
         split_args = args.split.split('|')
         if len(split_args) not in (2, 3):
-            print('incorrect number of split arguments')
-            exit(1)
+            print('incorrect number of split arguments', file=sys.stderr)
+            return 1
         if any(map(lambda arg: not arg.isnumeric(), split_args)):
-            print('split arguments must be non-negative integers')
-            exit(1)
+            print('split arguments must be non-negative integers', file=sys.stderr)
+            return 1
         split = tuple(map(int, split_args))
 
     target_map = get_neume_map()
     data, targets = match_raw_data(dataset_path, args.augment_mult, target_map)
 
-    dev = None
     val = None
+    test = None
 
     if args.split is None:
         train = SimpleDataset(data, targets)
@@ -195,20 +194,26 @@ def main(args):
             last = 0 if len(cumulative_split) == 0 else cumulative_split[-1]
             cumulative_split.append(denom * nom + last)
         train = SimpleDataset(data[:cumulative_split[0]], targets[:cumulative_split[0]])
-        dev = SimpleDataset(data[cumulative_split[0]: cumulative_split[1]], targets[cumulative_split[0]: cumulative_split[1]])
         if len(cumulative_split) == 3:
-            val = SimpleDataset(data[cumulative_split[1]: cumulative_split[2]], targets[cumulative_split[1]: cumulative_split[2]])
+            val = SimpleDataset(data[cumulative_split[0]: cumulative_split[1]], targets[cumulative_split[0]: cumulative_split[1]])
+            test = SimpleDataset(data[cumulative_split[1]: cumulative_split[2]], targets[cumulative_split[1]: cumulative_split[2]])
+        else:
+            test = SimpleDataset(data[cumulative_split[0]: cumulative_split[1]], targets[cumulative_split[0]: cumulative_split[1]])
+
 
     dataset_obj = {
         'train': train,
-        'dev': dev,
         'val': val,
-        'label_map': target_map
+        'test': test,
+        'label_map': list(sorted(target_map.keys(), lambda k: target_map[k]))
     }
 
     with lzma.open(args.output_basename + '.pklz', 'wb') as f:
         pickle.dump(dataset_obj, f)
 
+    return 0
+
 
 if __name__ == '__main__':
-    main(argparser.parse_args(sys.argv[1:]))
+    ec = main(argparser.parse_args(sys.argv[1:]))
+    exit(ec)

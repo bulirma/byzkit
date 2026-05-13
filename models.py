@@ -22,7 +22,8 @@ class CTCModel(nn.Module):
         self.device = device
 
     def forward(self, x):
-        b, c, h, w = x.size()
+        b, h, w, c = x.size()
+        x = x.permute(0, 3, 1, 2).contiguous()
         convoluted = self.backbone(x)
         _, c2, h2, w2 = convoluted.size()
         features = convoluted.permute(3, 0, 1, 2).contiguous()
@@ -152,7 +153,7 @@ def crnn_ctc_model(classes: int, learning_rate: float, weight_decay: float):
         nn.BatchNorm2d(256),
         nn.ReLU(),
         nn.Conv2d(256, 256, 1),
-        nn.BatchNorm2d(128),
+        nn.BatchNorm2d(256),
         nn.ReLU(),
         nn.MaxPool2d((2, 1), (2, 1)),
         nn.Dropout2d(p=0.2)
