@@ -1,5 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
+import torchvision.transforms.v2 as transforms
 
 import argparse
 from datetime import datetime
@@ -8,7 +9,7 @@ import os
 import pickle
 import sys
 
-from dataset import SimpleDataset
+from common import SimpleDataset
 from img import collate
 import models
 
@@ -27,7 +28,7 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 def main(args: argparse.Namespace):
     if args.dataset is None:
         print('dataset file is required', file=sys.stderr)
-        exit(1)
+        return 1
 
     learning_rate = 0.001
     weight_decay = 1e-4
@@ -38,13 +39,14 @@ def main(args: argparse.Namespace):
     train = dataset['train']
     test = dataset['test']
     num_classes = len(dataset['label_map'])
-    train.data = [torch.from_numpy(img).float() / 255 for img in train.data]
-    train.targets = [torch.from_numpy(target).long() for target in train.targets]
-    test.data = [torch.from_numpy(img).float() / 255 for img in test.data]
-    test.targets = [torch.from_numpy(target).long() for target in test.targets]
 
-    train_loader = DataLoader(train, batch_size=args.batch_size, shuffle=True, collate_fn=collate)
-    test_loader = DataLoader(test, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
+    transform = transforms.Compose([transforms.ToTensor()])
+
+    train_dataset = SimpleDataset(train['data'], train['targets'], transform)
+    test_dataset = SimpleDataset(test['data'], test['targets'], transform)
+
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
 
     model = models.crnn_ctc_model(num_classes, learning_rate, weight_decay)
 
@@ -66,6 +68,9 @@ def main(args: argparse.Namespace):
     model_fn = os.path.join(model_dir, f'{time}.model')
     torch.save(model_record, model_fn)
 
+    return 0
+
 
 if __name__ == '__main__':
-    main(argparser.parse_args(sys.argv[1:]))
+    ec = main(argparser.parse_args(sys.argv[1:]))
+    exit(ec)

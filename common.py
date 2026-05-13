@@ -2,8 +2,30 @@ import cv2
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
+from torch.utils.data import Dataset
 
 from typing import Union, List
+
+
+class SimpleDataset(Dataset):
+    def __init__(self, data, targets, transform=None):
+        super().__init__()
+        self.data = data
+        self.targets = targets
+        self.transform = transform
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        img = self.data[idx]
+        target = self.targets[idx]
+        if self.transform is not None:
+            img = self.transform(img)
+        else:
+            img = torch.from_numpy(img)
+        target = torch.from_numpy(target)
+        return img, target
 
 
 def plt_show(img: Union[cv2.Mat, np.ndarray, torch.Tensor], title: str = None):

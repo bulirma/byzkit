@@ -22,8 +22,7 @@ class CTCModel(nn.Module):
         self.device = device
 
     def forward(self, x):
-        b, h, w, c = x.size()
-        x = x.permute(0, 3, 1, 2).contiguous()
+        b, c, h, w = x.size()
         convoluted = self.backbone(x)
         _, c2, h2, w2 = convoluted.size()
         features = convoluted.permute(3, 0, 1, 2).contiguous()
