@@ -37,16 +37,26 @@ def main(args: argparse.Namespace):
         dataset = pickle.load(f)
 
     train = dataset['train']
+    #val = dataset['val']
     test = dataset['test']
     num_classes = len(dataset['label_map'])
 
-    transform = transforms.Compose([transforms.ToTensor()])
+    transform = transforms.Compose((
+        transforms.ToImage(),
+        transforms.ToDtype(torch.float32, scale=True)
+    ))
 
     train_dataset = SimpleDataset(train['data'], train['targets'], transform)
-    test_dataset = SimpleDataset(test['data'], test['targets'], transform)
+    #val_dataset = None
+    test_dataset = None
+    #if val['data'] is not None:
+    #    val_dataset = SimpleDataset(val['data'], val['targets'], transform)
+    if test['data'] is not None:
+        test_dataset = SimpleDataset(test['data'], test['targets'], transform)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
+    if test_dataset is not None:
+        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
 
     model = models.crnn_ctc_model(num_classes, learning_rate, weight_decay)
 
@@ -54,7 +64,7 @@ def main(args: argparse.Namespace):
     logs = model.fit(args.epochs, train_loader)
     train_end = datetime.now()
 
-    result = model.evaluate(test_loader)
+    result = None if test_dataset is None else model.evaluate(test_loader)
 
     model_record = {
         'model_state_dict': model.state_dict(),

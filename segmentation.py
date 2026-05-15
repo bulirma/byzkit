@@ -1,39 +1,6 @@
 import cv2
 import numpy as np
 
-def line_y_bounds(img: cv2.Mat):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    def get_y(contour):
-        _, y, _, h = cv2.boundingRect(contour)
-        return y + h / 2
-
-    contours = sorted(contours, key=get_y)
-
-    lines = []
-    current_line = [contours[0]]
-    
-    for c in contours[1:]:
-        _, y_prev, _, h_prev = cv2.boundingRect(current_line[-1])
-        _, y, _, h = cv2.boundingRect(c)
-        if y - (y_prev + h_prev) < 20:
-            current_line.append(c)
-        else:
-            lines.append(current_line)
-            current_line = [c]
-    lines.append(current_line)
-
-    bounds = []
-    for i, line_contours in enumerate(lines):
-        points = np.vstack(line_contours).reshape(-1, 2)
-        bbound = np.min(points[:, 1]) - 1
-        tbound = np.max(points[:, 1]) + 1
-        bounds.append((bbound, tbound))
-
-    return bounds
 
 def neume_x_bounds(img: cv2.Mat):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)

@@ -1,0 +1,10 @@
+metacentrum/install_requirements.sh
+metacentrum/prepare_job.sh
+metacentrum/job_train.pbs
+common.py
+dataset.py
+img.py
+models.py
+segmentation.py
+train.py
+intermediate_result_examples/bin_dataset/dataset.pklz

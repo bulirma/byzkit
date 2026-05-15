@@ -69,6 +69,7 @@ def gen_augmentation_examples(dataset_path: str, augmentation_multiplier: int):
 
     filenames = os.listdir(dataset_path)
     img_filenames = [filename for filename in filenames if filename.endswith('.png')]
+    img_filenames = sorted(img_filenames, key=lambda filename: int(filename.split('.')[0]))
     
     with tqdm(img_filenames) as pbar:
         for filename in pbar:
@@ -80,10 +81,14 @@ def gen_augmentation_examples(dataset_path: str, augmentation_multiplier: int):
                 transformed_image = transformed['image']
                 cv2.imwrite(os.path.join(examples_path, f'{name}_augmentation_{i}.png'), transformed_image)
 
+def test():
+    pass
+
 def match_raw_data(dataset_path: str, augmentation_multiplier: int, label_map: dict):
     labels_path = os.path.join(dataset_path, LABELS_FILENAME)
     filenames = os.listdir(dataset_path)
     img_filenames = [filename for filename in filenames if filename.endswith('.png')]
+    img_filenames = sorted(img_filenames, key=lambda filename: int(filename.split('.')[0]))
 
     max_height = 0
 

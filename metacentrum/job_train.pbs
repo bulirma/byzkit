@@ -1,0 +1,29 @@
+#!/bin/bash
+
+#PBS -N byz-ctc
+#PBS -l select=1:ncpus=1:mem=32gb:scratch_local=500mb:ngpus=1:gpu_mem=8gb:gpu_cap=compute_70:cuda_version=13.0
+#PBS -l walltime=2:00:00
+#PBS -o stdout.txt
+#PBS -e stderr.txt
+#PBS -m ae
+#PBS -V
+
+DATADIR="___currentdir___"
+
+cp "$DATADIR/common.py" "$SCRATCHDIR"
+cp "$DATADIR/dataset.py" "$SCRATCHDIR"
+cp "$DATADIR/img.py" "$SCRATCHDIR"
+cp "$DATADIR/models.py" "$SCRATCHDIR"
+cp "$DATADIR/segmentation.py" "$SCRATCHDIR"
+cp "$DATADIR/train.py" "$SCRATCHDIR"
+cp "$DATADIR/dataset.pklz" "$SCRATCHDIR"
+
+cd "$SCRATCHDIR"
+
+. "$DATADIR/venv/bin/activate"
+python train.py --dataset dataset.pklz
+deactivate
+
+cp -r "$SCRATCHDIR/dev-models" "$DATADIR"
+
+clean_scratch
