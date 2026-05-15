@@ -1,0 +1,28 @@
+#!/bin/bash
+
+#PBS -N byz-ds
+#PBS -l select=1:ncpus=1:mem=12gb:scratch_local=10gb
+#PBS -l walltime=8:00:00
+#PBS -o stdout.txt
+#PBS -e stderr.txt
+#PBS -m ae
+#PBS -V
+
+DATADIR="___currentdir___"
+
+unzip -d "$SCRATCHDIR" "$DATADIR/raw_dataset.zip"
+mkdir "$SCRATCHDIR/byztex"
+cp "$DATADIR/template_standalone.tex" "$SCRATCHDIR/byztex"
+cp "$DATADIR/dataset.py" "$SCRATCHDIR"
+cp "$DATADIR/neume.py" "$SCRATCHDIR"
+cp "$DATADIR/segmentation.py" "$SCRATCHDIR"
+
+cd "$SCRATCHDIR"
+
+. "$DATADIR/venv/bin/activate"
+python dataset.py --raw_dataset raw_dataset --augment 10 --split 8,1,1
+deactivate
+
+cp "$SCRATCHDIR/dataset.pklz" "$DATADIR"
+
+clean_scratch

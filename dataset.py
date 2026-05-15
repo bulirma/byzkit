@@ -11,9 +11,9 @@ import pickle
 import sys
 import subprocess
 
-from common import plt_show, plt_show_column_grid, plt_show_grid
+#from common import plt_show, plt_show_column_grid, plt_show_grid
 from neume import NeumeGenerator, load_classes
-from segmentation import get_line_images, get_line_images_with_neume_count, get_neume_images
+from segmentation import get_line_images_with_neume_count, get_line_bboxes, get_color_bbox
 
 
 NEUMES_PER_PAGE = 205
@@ -25,8 +25,7 @@ argparser.add_argument('--format', type=str, default='bin', help='dataset format
 argparser.add_argument('--output_basename', type=str, default='dataset', help='output directory|file basename (depends on the type)')
 argparser.add_argument('--raw_dataset', type=str, default=None, help='raw dataset to generate bin dataset')
 argparser.add_argument('--pages', type=int, default=10_000, help='number of pages to be generated for the raw dataset)')
-argparser.add_argument('--augment', action='store_true', help='use per page augmentation')
-argparser.add_argument('--augment_mult', type=int, default=10, help='augmentation multiplicator (augmentations per original)')
+argparser.add_argument('--augment', type=int, default=0, help='page augmentation multiplicator (no augmentation when 0)')
 argparser.add_argument('--split', type=str, default=None, help='split of pickle dataset (fmt: train,test or train,val,test')
 
 
@@ -56,33 +55,23 @@ def get_neume_map():
     classes = load_classes()
     return { c: i for i, c in enumerate(classes) }
 
-def gen_augmentation_examples(dataset_path: str, augmentation_multiplier: int):
-    examples_path = 'intermediate_result_examples/page_augmentation'
-
-    transform = A.Compose((
-        A.Rotate(angle_range=(-3, 3), p=0.5, crop_border=True),
-        A.ElasticTransform(alpha=3, sigma=40),
-        A.GridDistortion(num_steps=7, distort_range=(-0.5, 0.5)),
-        A.OpticalDistortion(distort_range=(-0.05, 0.05)),
-        A.GridElasticDeform(num_grid_xy=(16, 16), magnitude=3)
-    ))
-
-    filenames = os.listdir(dataset_path)
-    img_filenames = [filename for filename in filenames if filename.endswith('.png')]
-    img_filenames = sorted(img_filenames, key=lambda filename: int(filename.split('.')[0]))
-    
-    with tqdm(img_filenames) as pbar:
-        for filename in pbar:
-            name = filename.replace('.png', '')
-            page_img = cv2.imread(os.path.join(dataset_path, filename))
-            line_imgs, neume_counts = get_line_images_with_neume_count(page_img)
-            for i in range(augmentation_multiplier):
-                transformed = transform(image=page_img)
-                transformed_image = transformed['image']
-                cv2.imwrite(os.path.join(examples_path, f'{name}_augmentation_{i}.png'), transformed_image)
-
-def test():
-    pass
+def augment_page(page_img: cv2.Mat, mult: int):
+    augmentations = []
+    for _ in range(mult):
+        bboxes = get_line_bboxes(page_img)
+        mask = np.full_like(page_img, 255)
+        for i, bbox in enumerate(bboxes):
+            mask[bbox[0]: bbox[1], bbox[2]: bbox[3], :] = (0, 180 + i * 3, 0)
+        transformed = augment(image=page_img, mask=mask)
+        transformed_img = transformed['image']
+        transformed_mask = transformed['mask']
+        line_imgs = []
+        for i in range(len(bboxes)):
+            t, b, l, r = get_color_bbox(transformed_mask, (0, 180 + i * 3, 0))
+            line_img = transformed_img[t: b, l: r]
+            line_imgs.append(line_img)
+        augmentations.append(line_imgs)
+    return augmentations
 
 def match_raw_data(dataset_path: str, augmentation_multiplier: int, label_map: dict):
     labels_path = os.path.join(dataset_path, LABELS_FILENAME)
@@ -90,18 +79,16 @@ def match_raw_data(dataset_path: str, augmentation_multiplier: int, label_map: d
     img_filenames = [filename for filename in filenames if filename.endswith('.png')]
     img_filenames = sorted(img_filenames, key=lambda filename: int(filename.split('.')[0]))
 
-    max_height = 0
-
-    data = []
-    labels = []
+    pure_data = []
+    pure_labels = []
+    augmented_data = []
+    augmented_labels = []
     
     with tqdm(img_filenames) as pbar, open(labels_path, 'r') as lf:
         for filename in pbar:
             page_img = cv2.imread(os.path.join(dataset_path, filename))
             line_imgs, neume_counts = get_line_images_with_neume_count(page_img)
-            page_max_height = max(map(lambda img: img.shape[0], line_imgs))
-            if page_max_height > max_height:
-                max_height = page_max_height
+            page_labels = []
             for count in neume_counts:
                 line_labels = []
                 for _ in range(count):
@@ -109,13 +96,28 @@ def match_raw_data(dataset_path: str, augmentation_multiplier: int, label_map: d
                     if neume_entry == '':
                         continue
                     line_labels.append(label_map[neume_entry])
-                labels.append(np.asarray(line_labels, dtype=np.uint16))
-            data += line_imgs
+                page_labels.append(np.asarray(line_labels, dtype=np.uint16))
+            pure_data += line_imgs
+            pure_labels += page_labels
+            augmentations = augment_page(page_img, augmentation_multiplier)
+            for aug in augmentations:
+                augmented_data += aug
+                augmented_labels += page_labels
 
-    return data, labels
+    return pure_data, pure_labels, augmented_data, augmented_labels
 
 
 def main(args):
+    global augment
+
+    augment = A.Compose((
+        A.Rotate(angle_range=(-3, 3), p=0.5, crop_border=True),
+        A.ElasticTransform(alpha=3, sigma=40),
+        A.GridDistortion(num_steps=7, distort_range=(-0.5, 0.5)),
+        A.OpticalDistortion(distort_range=(-0.05, 0.05)),
+        A.GridElasticDeform(num_grid_xy=(16, 16), magnitude=3)
+    ), seed=args.seed)
+
     dataset_path = args.raw_dataset
 
     if dataset_path is None:
@@ -155,56 +157,68 @@ def main(args):
         print('dataset directory does not exist', file=sys.stderr)
         return 1
 
-    if args.split is not None:
-        split_args = args.split.split(',')
-        if len(split_args) not in (2, 3):
-            print('incorrect number of split arguments', file=sys.stderr)
-            return 1
-        if any(map(lambda arg: not arg.isnumeric(), split_args)):
-            print('split arguments must be non-negative integers', file=sys.stderr)
-            return 1
-        split = tuple(map(int, split_args))
+    if args.format == 'bin':
+        if args.split is not None:
+            split_args = args.split.split(',')
+            if len(split_args) not in (2, 3):
+                print('incorrect number of split arguments', file=sys.stderr)
+                return 1
+            if any(map(lambda arg: not arg.isnumeric(), split_args)):
+                print('split arguments must be non-negative integers', file=sys.stderr)
+                return 1
+            split = tuple(map(int, split_args))
 
-    target_map = get_neume_map()
-    data, targets = match_raw_data(dataset_path, args.augment_mult, target_map)
+        target_map = get_neume_map()
+        pure_data, pure_targets, augmented_data, augmented_targets = match_raw_data(dataset_path, args.augment, target_map)
 
-    val_data, val_targets = None, None
-    test_data, test_targets = None, None
+        val_data, val_targets = None, None
+        test_data, test_targets = None, None
 
-    if args.split is None:
-        train_data, train_targets = data, targets
-    else:
-        denom = len(data) // sum(split)
-        cumulative_split = []
-        for nom in split:
-            last = 0 if len(cumulative_split) == 0 else cumulative_split[-1]
-            cumulative_split.append(denom * nom + last)
-        train_data, train_targets = data[:cumulative_split[0]], targets[:cumulative_split[0]]
-        if len(cumulative_split) == 3:
-            val_data, val_targets = data[cumulative_split[0]: cumulative_split[1]], targets[cumulative_split[0]: cumulative_split[1]]
-            test_data, test_targets = data[cumulative_split[1]: cumulative_split[2]], targets[cumulative_split[1]: cumulative_split[2]]
+        if args.split is None:
+            train_data, train_targets = pure_data + augmented_data, pure_targets + augmented_targets
         else:
-            test_data, test_targets = data[cumulative_split[0]: cumulative_split[1]], targets[cumulative_split[0]: cumulative_split[1]]
+            denom = len(pure_data) // sum(split)
+            cumulative_split = []
+            for nom in split:
+                last = 0 if len(cumulative_split) == 0 else cumulative_split[-1]
+                cumulative_split.append(denom * nom + last)
+            train_data, train_targets = pure_data[:cumulative_split[0]], pure_targets[:cumulative_split[0]]
+            train_data += augmented_data
+            train_targets += augmented_targets
+            if len(cumulative_split) == 3:
+                val_data, val_targets = (
+                    pure_data[cumulative_split[0]: cumulative_split[1]],
+                    pure_targets[cumulative_split[0]: cumulative_split[1]]
+                )
+                test_data, test_targets = (
+                    pure_data[cumulative_split[1]: cumulative_split[2]],
+                    pure_targets[cumulative_split[1]: cumulative_split[2]]
+                )
+            else:
+                test_data, test_targets = (
+                    pure_data[cumulative_split[0]: cumulative_split[1]],
+                    pure_targets[cumulative_split[0]: cumulative_split[1]]
+                )
 
 
-    dataset_obj = {
-        'train': {
-            'data': train_data,
-            'targets': train_targets
-        },
-        'val': {
-            'data': val_data,
-            'targets': val_targets
-        },
-        'test': {
-            'data': test_data,
-            'targets': test_targets
-        },
-        'label_map': list(sorted(target_map.keys(), key=lambda k: target_map[k]))
-    }
+        dataset_obj = {
+            'train': {
+                'data': train_data,
+                'targets': train_targets
+            },
+            'val': {
+                'data': val_data,
+                'targets': val_targets
+            },
+            'test': {
+                'data': test_data,
+                'targets': test_targets
+            },
+            'label_map': list(sorted(target_map.keys(), key=lambda k: target_map[k]))
+        }
 
-    with lzma.open(args.output_basename + '.pklz', 'wb') as f:
-        pickle.dump(dataset_obj, f)
+        with lzma.open(args.output_basename + '.pklz', 'wb') as f:
+            pickle.dump(dataset_obj, f)
 
     return 0
 

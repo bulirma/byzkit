@@ -36,8 +36,7 @@ def neume_x_bounds(img: cv2.Mat):
 
     return bounds
 
-
-def get_line_images(img: cv2.Mat):
+def get_line_bboxes(img: cv2.Mat) -> list:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     
@@ -56,18 +55,35 @@ def get_line_images(img: cv2.Mat):
     
     line_contours.sort(key=lambda x: x[1])
 
-    line_imgs = []
+    line_bboxes = []
     for i, (contour, _) in enumerate(line_contours):
         x, y, w, h = cv2.boundingRect(contour)
         l = x - 2
         r = x + w + 2
         t = y - 2
         b = y + h + 2
+        line_bboxes.append((t, b, l, r))
 
+    return line_bboxes
+
+def get_line_images(img: cv2.Mat):
+    bboxes = get_line_bboxes(img)
+    line_imgs = []
+    for t, b, l, r in bboxes:
         line_img = img[t: b, l: r]
         line_imgs.append(line_img)
-
     return line_imgs
+
+def get_color_bbox(img: cv2.Mat, color: tuple) -> tuple:
+    mask = (img == color).all(axis=2)
+    coords = np.column_stack(np.nonzero(mask))
+    ys = coords[:, 0]
+    xs = coords[:, 1]
+    t = min(ys)
+    b = max(ys)
+    l = min(xs)
+    r = max(xs)
+    return (t, b, l, r)
 
 def get_neume_images(line_img: cv2.Mat) -> list:
     imgs = []

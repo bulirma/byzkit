@@ -1,10 +1,13 @@
 metacentrum/install_requirements.sh
 metacentrum/prepare_job.sh
 metacentrum/job_train.pbs
+metacentrum/job_synth.pbs
 common.py
 dataset.py
 img.py
 models.py
+neume.py
 segmentation.py
 train.py
-intermediate_result_examples/bin_dataset/dataset.pklz
+raw_dataset.zip
+byztex/template_standalone.tex
