@@ -1,11 +1,12 @@
 import albumentations as A
 import cv2
+import lmdb
 import numpy as np
 from pdf2image import convert_from_path
 from tqdm import tqdm
 
 import argparse
-import lzma
+import math
 import os
 import pickle
 import sys
@@ -21,8 +22,8 @@ LABELS_FILENAME = 'labels.txt'
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--seed', type=int, default=None, help='seed (default: None)')
-argparser.add_argument('--format', type=str, default='bin', help='dataset format to generate: raw|bin (default: bin)')
-argparser.add_argument('--output_basename', type=str, default='dataset', help='output directory|file basename (depends on the type)')
+argparser.add_argument('--format', type=str, default='bin', help='dataset format to generate: bin|raw (default: bin)')
+argparser.add_argument('--output', type=str, default=None, help='output directory|file name')
 argparser.add_argument('--raw_dataset', type=str, default=None, help='raw dataset to generate bin dataset')
 argparser.add_argument('--pages', type=int, default=10_000, help='number of pages to be generated for the raw dataset)')
 argparser.add_argument('--augment', type=int, default=0, help='page augmentation multiplicator (no augmentation when 0)')
@@ -73,21 +74,43 @@ def augment_page(page_img: cv2.Mat, mult: int):
         augmentations.append(line_imgs)
     return augmentations
 
-def match_raw_data(dataset_path: str, augmentation_multiplier: int, label_map: dict):
+def match_raw_data(lmdb_env: lmdb.Environment, dataset_path: str, augmentation_multiplier: int, label_map: dict):
     labels_path = os.path.join(dataset_path, LABELS_FILENAME)
     filenames = os.listdir(dataset_path)
     img_filenames = [filename for filename in filenames if filename.endswith('.png')]
     img_filenames = sorted(img_filenames, key=lambda filename: int(filename.split('.')[0]))
 
-    pure_data = []
-    pure_labels = []
-    augmented_data = []
-    augmented_labels = []
-    
+    pure_db = lmdb_env.open_db(b'pure')
+    augmented_db = lmdb_env.open_db(b'augmented')
+    pure_key_width = math.ceil(math.log10(len(img_filenames)))
+    augmented_key_width = math.ceil(math.log10(len(img_filenames) * (1 + augmentation_multiplier)))
+
+    pure_idx = 0
+    augmented_idx = 0
+    max_height = 0
+
+    def save(txn: lmdb.Transaction, db: lmdb._Database, page_line_imgs: list, page_line_labels: list, idx_offset: int, key_width: int):
+        for idx, (line_img, line_label) in enumerate(zip(page_line_imgs, page_line_labels)):
+            key = str(idx_offset + idx).zfill(key_width).encode()
+            sample = {
+                'image': line_img,
+                'target': line_label
+            }
+            value = pickle.dumps(sample)
+            txn.put(key, value, db=db)
+
+    def update_max_height(page_line_imgs: list):
+        nonlocal max_height
+        page_max_height = max(map(lambda img: img.shape[0], page_line_imgs))
+        if page_max_height > max_height:
+            max_height = page_max_height
+
+    print('sample segmentation and augmentation...')
     with tqdm(img_filenames) as pbar, open(labels_path, 'r') as lf:
         for filename in pbar:
             page_img = cv2.imread(os.path.join(dataset_path, filename))
             line_imgs, neume_counts = get_line_images_with_neume_count(page_img)
+            update_max_height(line_imgs)
             page_labels = []
             for count in neume_counts:
                 line_labels = []
@@ -97,14 +120,101 @@ def match_raw_data(dataset_path: str, augmentation_multiplier: int, label_map: d
                         continue
                     line_labels.append(label_map[neume_entry])
                 page_labels.append(np.asarray(line_labels, dtype=np.uint16))
-            pure_data += line_imgs
-            pure_labels += page_labels
             augmentations = augment_page(page_img, augmentation_multiplier)
-            for aug in augmentations:
-                augmented_data += aug
-                augmented_labels += page_labels
+            with lmdb_env.begin(write=True) as txn:
+                save(txn, pure_db, line_imgs, page_labels, pure_idx, pure_key_width)
+                pure_idx += len(line_imgs)
+                for aug in augmentations:
+                    update_max_height(aug)
+                    save(txn, augmented_db, aug, page_labels, augmented_idx, augmented_key_width)
+                    augmented_idx += len(aug)
 
-    return pure_data, pure_labels, augmented_data, augmented_labels
+    metadata = {
+        'db_type': 'match',
+        'pure': {
+            'samples': pure_idx,
+            'key_width': pure_key_width
+        },
+        'augmented': {
+            'samples': augmented_idx,
+            'key_width': augmented_key_width
+        },
+        'label_map': list(sorted(label_map.keys(), key=lambda k: label_map[k])),
+        'sample_image_max_height': max_height
+    }
+
+    print('storing metadata...')
+    with lmdb_env.begin(write=True) as txn:
+        txn.put(b'metadata', pickle.dumps(metadata))
+
+def apply_split(tmp_env: lmdb.Environment, target_env: lmdb.Environment, split: tuple):
+    pure_db = tmp_env.open_db(b'pure')
+    augmented_db = tmp_env.open_db(b'augmented')
+    train_db = target_env.open_db(b'train')
+    val_db = target_env.open_db(b'val')
+    test_db = target_env.open_db(b'test')
+
+    print('splitting the dataset...')
+
+    with tmp_env.begin(write=False) as in_txn:
+        tmp_metadata = pickle.loads(in_txn.get(b'metadata'))
+
+    tmp_key_width = tmp_metadata['pure']['key_width']
+    augmented_count = tmp_metadata['augmented']['samples']
+    denom = tmp_metadata['pure']['samples'] // sum(split)
+    cumulative_split = []
+    for nom in split:
+        last = 0 if len(cumulative_split) == 0 else cumulative_split[-1]
+        cumulative_split.append(denom * nom + last)
+
+    target_metadata = {
+        'db_type': 'split',
+        'label_map': tmp_metadata['label_map'],
+        'sample_image_max_height': tmp_metadata['sample_image_max_height']
+    }
+
+    begin = 0
+    for end, db, dbname in zip(cumulative_split, [train_db, val_db, test_db], ['train', 'val', 'test']):
+        count = end - begin
+        arg_count = count + (augmented_count if dbname == 'train' else 0)
+        key_width = math.ceil(math.log10(arg_count)) if arg_count > 0 else 0
+        target_metadata[dbname] = {
+            'samples': count,
+            'key_width': key_width
+        }
+
+        print(f'storing {dbname} samples...')
+
+        with tmp_env.begin(write=False) as in_txn, target_env.begin(write=True) as out_txn, tqdm(range(count)) as pbar:
+            for i in pbar:
+                tmp_key = str(begin + i).zfill(tmp_key_width).encode()
+                key = str(i).zfill(key_width).encode()
+                value = in_txn.get(tmp_key, db=pure_db)
+                if dbname == 'train':
+                    sample = pickle.loads(value)
+                    sample['is_augmented'] = False
+                    value = pickle.dumps(sample)
+                out_txn.put(key, value, db=db)
+            begin = end
+
+    print('storing augmented samples...')
+    
+    target_metadata['train']['samples'] += augmented_count
+    tmp_key_width = tmp_metadata['augmented']['key_width']
+    key_width = target_metadata['train']['key_width']
+    with tmp_env.begin(write=False) as in_txn, target_env.begin(write=True) as out_txn, tqdm(range(augmented_count)) as pbar:
+        for i in pbar:
+            tmp_key = str(i).zfill(tmp_key_width).encode()
+            key = str(begin + i).zfill(key_width).encode()
+            value = in_txn.get(tmp_key, db=augmented_db)
+            sample = pickle.loads(value)
+            sample['is_augmented'] = True
+            value = pickle.dumps(sample)
+            out_txn.put(key, value, db=db)
+
+    print('storing metadata...')
+    with target_env.begin(write=True) as txn:
+        txn.put(b'metadata', pickle.dumps(target_metadata))
 
 
 def main(args):
@@ -117,15 +227,20 @@ def main(args):
         A.OpticalDistortion(distort_range=(-0.05, 0.05)),
         A.GridElasticDeform(num_grid_xy=(16, 16), magnitude=3)
     ), seed=args.seed)
+    if args.seed is not None:
+        np.random.seed(args.seed)
 
     dataset_path = args.raw_dataset
+    if args.output is None:
+        output_name = 'dataset.lmdb' if args.format == 'bin' else 'raw_dataset'
+    else:
+        output_name = args.output
+    output_basename = os.path.join(os.path.dirname(output_name), os.path.basename(output_name).split('.')[0])
 
     if dataset_path is None:
-        filename = f'{args.output_basename}.tex'
-        tex_path = os.path.join(os.path.dirname(__file__), filename)
-        outdir_path = os.path.join(os.path.dirname(__file__), args.output_basename)
-        label_path = os.path.join(outdir_path, LABELS_FILENAME)
-        os.makedirs(outdir_path, exist_ok=True)
+        tex_path = f'{output_basename}.tex'
+        label_path = os.path.join(output_basename, LABELS_FILENAME)
+        os.makedirs(output_basename, exist_ok=True)
 
         init_document(tex_path)
         generator = NeumeGenerator(seed=args.seed)
@@ -145,13 +260,13 @@ def main(args):
         print('typesetting lualatex document...')
         typeset_document(tex_path)
         print('converting pdf to an image...')
-        convert(tex_path.replace('.tex', '.pdf'), outdir_path)
+        convert(tex_path.replace('.tex', '.pdf'), output_basename)
 
         # cleaning
         os.remove(tex_path)
         os.remove(tex_path.replace('.tex', '.pdf'))
 
-        dataset_path = outdir_path
+        dataset_path = output_basename
 
     elif not os.path.exists(dataset_path):
         print('dataset directory does not exist', file=sys.stderr)
@@ -167,58 +282,21 @@ def main(args):
                 print('split arguments must be non-negative integers', file=sys.stderr)
                 return 1
             split = tuple(map(int, split_args))
-
-        target_map = get_neume_map()
-        pure_data, pure_targets, augmented_data, augmented_targets = match_raw_data(dataset_path, args.augment, target_map)
-
-        val_data, val_targets = None, None
-        test_data, test_targets = None, None
-
-        if args.split is None:
-            train_data, train_targets = pure_data + augmented_data, pure_targets + augmented_targets
+            if len(split) == 2:
+                split = (split[0], 0, split[1])
         else:
-            denom = len(pure_data) // sum(split)
-            cumulative_split = []
-            for nom in split:
-                last = 0 if len(cumulative_split) == 0 else cumulative_split[-1]
-                cumulative_split.append(denom * nom + last)
-            train_data, train_targets = pure_data[:cumulative_split[0]], pure_targets[:cumulative_split[0]]
-            train_data += augmented_data
-            train_targets += augmented_targets
-            if len(cumulative_split) == 3:
-                val_data, val_targets = (
-                    pure_data[cumulative_split[0]: cumulative_split[1]],
-                    pure_targets[cumulative_split[0]: cumulative_split[1]]
-                )
-                test_data, test_targets = (
-                    pure_data[cumulative_split[1]: cumulative_split[2]],
-                    pure_targets[cumulative_split[1]: cumulative_split[2]]
-                )
-            else:
-                test_data, test_targets = (
-                    pure_data[cumulative_split[0]: cumulative_split[1]],
-                    pure_targets[cumulative_split[0]: cumulative_split[1]]
-                )
+            split = (1, 0, 0)
 
+        size = args.pages * (1 + args.augment) * 12 * 1024 ** 2
+        tmp_output_name = f'match_{output_name}'
+        tmp_env = lmdb.open(tmp_output_name, map_size=size, max_dbs=2)
+        target_env = lmdb.open(output_name, map_size=size, max_dbs=3)
 
-        dataset_obj = {
-            'train': {
-                'data': train_data,
-                'targets': train_targets
-            },
-            'val': {
-                'data': val_data,
-                'targets': val_targets
-            },
-            'test': {
-                'data': test_data,
-                'targets': test_targets
-            },
-            'label_map': list(sorted(target_map.keys(), key=lambda k: target_map[k]))
-        }
+        match_raw_data(tmp_env, dataset_path, args.augment, get_neume_map())
+        apply_split(tmp_env, target_env, split)
 
-        with lzma.open(args.output_basename + '.pklz', 'wb') as f:
-            pickle.dump(dataset_obj, f)
+        tmp_env.close()
+        target_env.close()
 
     return 0
 
