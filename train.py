@@ -1,22 +1,24 @@
+import lmdb
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 import torchvision.transforms.v2 as transforms
 
 import argparse
 from datetime import datetime
-import lzma
+import json
 import os
 import pickle
 import sys
 
-from common import SimpleDataset
+from common import SplitDataset
 from img import collate
 import models
 
 
 argparser = argparse.ArgumentParser()
-argparser.add_argument('--dataset', default=None, type=str, help='dataset file')
-argparser.add_argument('--model_dir', default='dev-models', type=str, help='directory to save models')
+argparser.add_argument('--dataset', default=None, type=str, help='lmdb split dataset')
+argparser.add_argument('--model', default=None, type=str, help='path to save the model to')
 argparser.add_argument('--seed', default=42, type=int, help='randomization seed')
 argparser.add_argument('--epochs', default=20, type=int, help='number of epochs')
 argparser.add_argument('--batch_size', default=100, type=int, help='batch size')
@@ -29,54 +31,58 @@ def main(args: argparse.Namespace):
     if args.dataset is None:
         print('dataset file is required', file=sys.stderr)
         return 1
+    if args.model is None:
+        print('model path is required', file=sys.stderr)
+        return 1
 
     learning_rate = 0.001
     weight_decay = 1e-4
 
-    with lzma.open(args.dataset, 'rb') as f:
-        dataset = pickle.load(f)
+    env = lmdb.open(args.dataset, max_dbs=6)
 
-    train = dataset['train']
-    #val = dataset['val']
-    test = dataset['test']
-    num_classes = len(dataset['label_map'])
+    with env.begin(write=False) as txn:
+        metadata = pickle.loads(txn.get(b'metadata'))
+
+    print(metadata)
+    return 1
+
+    num_classes = len(metadata['label_map'])
+    max_heihgt = metadata['sample_image_max_height']
 
     transform = transforms.Compose((
         transforms.ToImage(),
         transforms.ToDtype(torch.float32, scale=True)
     ))
 
-    train_dataset = SimpleDataset(train['data'], train['targets'], transform)
-    #val_dataset = None
-    test_dataset = None
-    #if val['data'] is not None:
-    #    val_dataset = SimpleDataset(val['data'], val['targets'], transform)
-    if test['data'] is not None:
-        test_dataset = SimpleDataset(test['data'], test['targets'], transform)
+    train_dataset = SplitDataset(env, 'train', transform)
+    #val_dataset = SplitDataset(env, 'val', transform)
+    test_dataset = SplitDataset(env, 'test', transform)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate)
-    if test_dataset is not None:
+    if len(test_dataset) > 0:
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
 
-    model = models.crnn_ctc_model(num_classes, learning_rate, weight_decay)
+    model = models.crnn_ctc_model(num_classes, learning_rate, weight_decay, max_heihgt)
 
     train_begin = datetime.now()
     logs = model.fit(args.epochs, train_loader)
     train_end = datetime.now()
 
-    result = None if test_dataset is None else model.evaluate(test_loader)
+    result = None
+    if len(test_dataset) > 0:
+        result = model.evaluate(test_loader)
 
-    model_record = {
-        'model_state_dict': model.state_dict(),
+    metadata_record = {
         'train_logs': logs,
         'training_time': train_end - train_begin,
         'evaluation_result': result
     }
-    model_dir = os.path.join(os.path.dirname(__file__), args.model_dir)
-    os.makedirs(model_dir, exist_ok=True)
-    time = datetime.now().strftime('%d%H%M%S')
-    model_fn = os.path.join(model_dir, f'{time}.model')
-    torch.save(model_record, model_fn)
+
+    os.makedirs(model, exist_ok=True)
+    model_state = {k: v.cpu().numpy() for k, v in model.state_dict().items()}
+    np.savez_compressed(os.path.join(args.model, 'state.npz'), **model_state)
+    with open(os.path.join(args.model, 'metadata.json'), 'w') as f:
+        json.dump(metadata_record, f, indent=4)
 
     return 0
 

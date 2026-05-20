@@ -113,7 +113,7 @@ def ctc_greedy_decode(logits: torch.Tensor):
             collapsed.append(symbol)
     return [symbol.item() for symbol in collapsed if symbol != 2]
 
-def crnn_ctc_model(classes: int, learning_rate: float, weight_decay: float):
+def crnn_ctc_model(classes: int, learning_rate: float, weight_decay: float, img_height: int):
     backbone = nn.Sequential(
         nn.Conv2d(3, 32, 3, padding=1),
         nn.BatchNorm2d(32),
@@ -157,8 +157,10 @@ def crnn_ctc_model(classes: int, learning_rate: float, weight_decay: float):
         nn.MaxPool2d((2, 1), (2, 1)),
         nn.Dropout2d(p=0.2)
     )
-    # 256 * 5 = 1280
-    model = CTCModel(DEVICE, classes, backbone, 1280, 512, 2)
+    c = 256
+    #height = img_height / 16
+    height = 16
+    model = CTCModel(DEVICE, classes, backbone, int(c * height), 512, 2)
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=150, eta_min=0)
     model.configure(

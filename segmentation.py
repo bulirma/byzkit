@@ -40,17 +40,18 @@ def get_line_bboxes(img: cv2.Mat) -> list:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     
-    closing_kernel = np.ones((12, 88), np.uint8)
+    closing_kernel = np.ones((20, 120), np.uint8)
     closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, closing_kernel)
-    dilatation_kernel = np.ones((7, 7), np.uint8)
+    dilatation_kernel = np.ones((8, 12), np.uint8)
     dilated = cv2.dilate(closed, dilatation_kernel, iterations=1)
-    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    closed = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, closing_kernel)
+    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     line_contours = []
     for c in contours:
         x, y, w, h = cv2.boundingRect(c)
         area = cv2.contourArea(c)
-        if h > 30 and w > 150 and area > 1000:
+        if h > 8 and w > 12 and area > 32:
             line_contours.append((c, y))
     
     line_contours.sort(key=lambda x: x[1])

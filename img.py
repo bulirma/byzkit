@@ -3,17 +3,13 @@ from torch.nn import functional as F
 
 
 def pad_batch_images(imgs: torch.Tensor, pad_value=0):
-    def pad(img, h, w):
+    def pad_horizontal(img, w):
         nonlocal pad_value
-        vt = h - img.size(1)
-        t = vt // 2
-        b = vt - t
         r = w - img.size(2)
-        return F.pad(img, (0, r, t, b), mode='constant', value=pad_value)
+        return F.pad(img, (0, r, 0, 0), mode='constant', value=pad_value)
 
-    max_h = max(map(lambda img: img.size(1), imgs))
     max_w = max(map(lambda img: img.size(2), imgs))
-    return torch.stack([pad(img, max_h, max_w) for img in imgs])
+    return torch.stack([pad_horizontal(img, max_w) for img in imgs])
 
 def collate(batch):
     imgs = [b[0] for b in batch]

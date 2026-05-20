@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #PBS -N byz-ds
-#PBS -l select=1:ncpus=1:mem=12gb:scratch_local=5gb
+#PBS -l select=1:ncpus=1:mem=6gb:scratch_local=5gb
 #PBS -l walltime=14:00:00
 #PBS -o stdout.txt
 #PBS -e stderr.txt
@@ -13,6 +13,7 @@ DATADIR="___currentdir___"
 unzip -d "$SCRATCHDIR" "$DATADIR/raw_dataset_1k.zip"
 mkdir "$SCRATCHDIR/byztex"
 cp "$DATADIR/template_standalone.tex" "$SCRATCHDIR/byztex"
+cp "$DATADIR/common.py" "$SCRATCHDIR"
 cp "$DATADIR/dataset.py" "$SCRATCHDIR"
 cp "$DATADIR/neume.py" "$SCRATCHDIR"
 cp "$DATADIR/segmentation.py" "$SCRATCHDIR"
@@ -20,7 +21,7 @@ cp "$DATADIR/segmentation.py" "$SCRATCHDIR"
 cd "$SCRATCHDIR"
 
 . "$DATADIR/venv/bin/activate"
-python dataset.py --type match --raw_dataset raw_dataset_1k --output dataset_4k.lmdb --augment 3
+python dataset.py --type match --input raw_dataset_1k --output dataset_4k.lmdb --augment 3
 deactivate
 
 cp -r "$SCRATCHDIR/dataset_4k.lmdb" "$DATADIR"

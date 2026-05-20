@@ -9,5 +9,5 @@ models.py
 neume.py
 segmentation.py
 train.py
-raw_dataset.zip
 byztex/template_standalone.tex
+notrack/ds3k.lmdb
