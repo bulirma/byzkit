@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from torch.nn import functional as F
 
@@ -19,3 +20,11 @@ def collate(batch):
     targets = torch.cat(targets).long()
     lengths = torch.tensor(lengths, dtype=torch.long)
     return images_padded, targets, lengths
+
+def symmetric_pad(array: np.ndarray, axis: int, size: int, value):
+    total = size - array.shape[axis]
+    before = total // 2
+    after = total - before
+    pad_width = [(0, 0)] * array.ndim
+    pad_width[axis] = (before, after)
+    return np.pad(array, pad_width, mode='constant', constant_values=value)

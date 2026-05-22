@@ -20,7 +20,7 @@ def neume_x_bounds(img: cv2.Mat):
     for c in contours[1:]:
         x_prev, _, w_prev, _ = cv2.boundingRect(current_neume[-1])
         x, _, _, _ = cv2.boundingRect(c)
-        if x - (x_prev + w_prev) < 6:
+        if x - (x_prev + w_prev) < 18:
             current_neume.append(c)
         else:
             neumes.append(current_neume)
@@ -40,9 +40,9 @@ def get_line_bboxes(img: cv2.Mat) -> list:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     
-    closing_kernel = np.ones((20, 120), np.uint8)
+    closing_kernel = np.ones((32, 184), np.uint8)
     closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, closing_kernel)
-    dilatation_kernel = np.ones((8, 12), np.uint8)
+    dilatation_kernel = np.ones((12, 16), np.uint8)
     dilated = cv2.dilate(closed, dilatation_kernel, iterations=1)
     closed = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, closing_kernel)
     contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -51,7 +51,7 @@ def get_line_bboxes(img: cv2.Mat) -> list:
     for c in contours:
         x, y, w, h = cv2.boundingRect(c)
         area = cv2.contourArea(c)
-        if h > 8 and w > 12 and area > 32:
+        if h > 6 and w > 8 and area > 16:
             line_contours.append((c, y))
     
     line_contours.sort(key=lambda x: x[1])
