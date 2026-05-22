@@ -18,21 +18,21 @@ from segmentation import get_line_images_with_neume_count, get_line_bboxes, get_
 
 
 LINES_PER_PAGE = 12
-MIN_NEUMES_PER_LINE = 8
-MAX_NEUMES_PER_LINE = 16
+MIN_NEUMES_PER_LINE = 7
+MAX_NEUMES_PER_LINE = 15
 LABELS_FILENAME = 'labels.txt'
 DS_TYPES = ['page', 'line', 'db', 'sdb']
 DS_RESERVED_NAMES = ['ds_page', 'ds_line', 'ds.lmdb']
 
 argparser = argparse.ArgumentParser()
-argparser.add_argument('--seed', type=int, default=None, help='seed (default: None)')
+argparser.add_argument('--seed', type=int, default=None, help='seed (no seed by default)')
 argparser.add_argument('--type', type=str, default='db', help=f'dataset format to generate: {"|".join(DS_TYPES)} (default: db)')
-argparser.add_argument('--output', type=str, default=None, help='output directory path')
-argparser.add_argument('--input', type=str, default=None, help='input dataset (raw or match)')
-argparser.add_argument('--pages', type=int, default=10_000, help='number of pages to be generated for the raw dataset)')
+argparser.add_argument('--output', type=str, default=None, help='output dataset path')
+argparser.add_argument('--input', type=str, default=None, help='input dataset path')
+argparser.add_argument('--pages', type=int, default=10_000, help='number of pages to be generated for the page dataset')
 argparser.add_argument('--augment', type=int, default=0, help='page augmentation multiplicator (no augmentation when 0)')
 argparser.add_argument('--split', type=str, default=None, help='split of pickle dataset (fmt: train,test or train,val,test')
-argparser.add_argument('--min_neumes_per_line', type=int, default=8, help='minimum number of neumes per line')
+argparser.add_argument('--min_neumes_per_line', type=int, default=MIN_NEUMES_PER_LINE, help='minimum number of neumes per line')
 
 
 def validate_args(args: argparse.Namespace) -> bool:
@@ -322,6 +322,8 @@ def create_database(line_dataset_path: str, outdir_path:str, lmdb_env: lmdb.Envi
                     txn.put(key, data_value, db=data_db)
                     txn.put(key, target_value, db=targets_db)
 
+                idx += 1
+
     with open(os.path.join(outdir_path, 'metadata.json'), 'w') as f:
         json.dump(metadata, f, indent=4)
 
@@ -429,7 +431,7 @@ def main(args):
         return 1
 
     if i == 0:
-        output_name = args.output if o == 1 else DS_RESERVED_NAMES[0]
+        output_name = args.output if o == 1 else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[0])
         output_name = os.path.join(os.path.dirname(__file__), output_name)
         tex_path = f'{output_name}.tex'
         if is_existing_dir(output_name):
@@ -442,7 +444,7 @@ def main(args):
     if o == 1:
         return 0
     if i < 2:
-        output_name = args.output if o == 2 else DS_RESERVED_NAMES[1]
+        output_name = args.output if o == 2 else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[1])
         if is_existing_dir(output_name):
             empty_dir(output_name)
         else:
@@ -452,7 +454,7 @@ def main(args):
     if o == 2:
         return 0
     if i < 3:
-        output_name = args.output if o == 3 else DS_RESERVED_NAMES[2]
+        output_name = args.output if o == 3 else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[2])
         if is_existing_dir(output_name):
             shutil.rmtree(output_name)
         db_env = lmdb.open(output_name, map_size=db_size, max_dbs=4)

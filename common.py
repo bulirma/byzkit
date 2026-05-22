@@ -117,7 +117,7 @@ def plt_show_column_grid(imgs: List[Union[cv2.Mat, np.ndarray, torch.Tensor]], t
 
 def dec_width(n: int):
     w = math.ceil(math.log10(n))
-    if n % 10 == 0:
+    if 10 ** w == n:
         return w + 1
     return w
 
