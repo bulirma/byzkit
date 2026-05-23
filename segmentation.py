@@ -1,12 +1,32 @@
 import cv2
 import numpy as np
 
+import math
 
-def neume_x_bounds(img: cv2.Mat):
+
+def contour_distance(contour0: np.ndarray, contour1: np.ndarray) -> float:
+    pts0 = contour0[:, 0, :]
+    pts1 = contour1[:, 0, :]
+
+    rightmost_pt0 = pts0[pts0[:, 0].argmax()]
+    leftmost_pt1 = pts1[pts1[:, 0].argmin()]
+
+    x0, y0 = rightmost_pt0
+    x1, y1 = leftmost_pt1
+
+    x = x1 - x0
+    y = abs(y0 - y1)
+    return math.sqrt(x ** 2 + y ** 2)
+
+def neume_x_bounds(img: cv2.Mat) -> list:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    closing_kernel = np.ones((2, 6), np.uint8)
+    closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, closing_kernel)
+    dilatation_kernel = np.ones((1, 4), np.uint8)
+    dilated = cv2.dilate(closed, dilatation_kernel, iterations=1)
+    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     def get_x(contour):
         x, _, w, _ = cv2.boundingRect(contour)
@@ -16,11 +36,14 @@ def neume_x_bounds(img: cv2.Mat):
 
     neumes = []
     current_neume = [contours[0]]
-    
+
     for c in contours[1:]:
         x_prev, _, w_prev, _ = cv2.boundingRect(current_neume[-1])
         x, _, _, _ = cv2.boundingRect(c)
-        if x - (x_prev + w_prev) < 18:
+        rx_prev = x_prev + w_prev
+        bbox_dist = x - rx_prev
+        dist = contour_distance(current_neume[-1], c)
+        if bbox_dist < 4 or dist < 8 or (bbox_dist < 8 and dist < 14):
             current_neume.append(c)
         else:
             neumes.append(current_neume)
@@ -28,7 +51,7 @@ def neume_x_bounds(img: cv2.Mat):
     neumes.append(current_neume)
 
     bounds = []
-    for i, neume in enumerate(neumes):
+    for neume in neumes:
         points = np.vstack(neume).reshape(-1, 2)
         lbound = np.min(points[:, 0]) - 1
         rbound = np.max(points[:, 0]) + 1

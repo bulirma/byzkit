@@ -5,10 +5,12 @@ import os
 import random
 import shutil
 import subprocess
+import sys
 from typing import List, Tuple
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-LINES_PER_PAGE = 12
+from dataset import LINES_PER_PAGE
 
 
 def clean(info: dict):

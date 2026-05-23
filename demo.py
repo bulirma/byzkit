@@ -15,6 +15,8 @@ from img import symmetric_pad
 NEUME_IMG_DIR_PATH = os.path.join('byztex', 'named_neume_images')
 NEUME_IMG_FILENAMES = list(sorted(os.listdir(NEUME_IMG_DIR_PATH)))
 NEUME_IMGS = [cv2.imread(os.path.join(NEUME_IMG_DIR_PATH, filename)) for filename in NEUME_IMG_FILENAMES]
+NEUME_IMGS_MAX_HEIGHT = max(map(lambda img: img.shape[0], NEUME_IMGS))
+NEUME_IMGS = [symmetric_pad(img, 0, NEUME_IMGS_MAX_HEIGHT, 255) for img in NEUME_IMGS]
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--dataset', type=str, default=None, help='dataset path')
@@ -27,8 +29,6 @@ def show_sample(txn: lmdb.Transaction, data_db: lmdb._Database, targets_db: lmdb
     target_buf = io.BytesIO(target)
     label = np.load(target_buf, allow_pickle=False)['target']
     label_neume_imgs = [NEUME_IMGS[i] for i in label]
-    max_height = max(map(lambda img: img.shape[0], label_neume_imgs))
-    label_neume_imgs = [symmetric_pad(img, 0, max_height, 255) for img in label_neume_imgs]
     label_img = np.concatenate(label_neume_imgs, axis=1)
     plt_show_column_grid([label_img, img], ['label', 'sample'], 1)
 
