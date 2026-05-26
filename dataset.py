@@ -240,14 +240,14 @@ def create_line_image_dataset(raw_dataset_path: str, outdir_path: str, augmentat
             line_imgs, neume_counts = get_line_images_with_neume_count(page_img)
             update_max_height(line_imgs)
             page_labels = []
-            for count in neume_counts:
-                line_labels = []
-                for _ in range(count):
-                    with label_file_lock:
+            with label_file_lock:
+                for count in neume_counts:
+                    line_labels = []
+                    for _ in range(count):
                         neume_entry = lf.readline().strip()
                         if neume_entry != '':
                             line_labels.append(label_map[neume_entry])
-                page_labels.append(np.asarray(line_labels, dtype=np.uint16))
+                    page_labels.append(np.asarray(line_labels, dtype=np.uint16))
             augmentations = augment_page(page_img, augmentation_multiplier)
 
             line_name_width = dec_width(len(line_imgs))
