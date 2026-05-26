@@ -1,5 +1,6 @@
 import albumentations as A
 import cv2
+from joblib import Parallel, delayed
 import lmdb
 import numpy as np
 from pdf2image import convert_from_path
@@ -11,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+from threading import Lock
 
 from common import dec_width, is_existing_dir, empty_dir
 from neume import NeumeGenerator, load_classes
@@ -25,6 +27,7 @@ DS_TYPES = ['page', 'line', 'db', 'sdb']
 DS_RESERVED_NAMES = ['ds_page', 'ds_line', 'ds.lmdb']
 
 argparser = argparse.ArgumentParser()
+argparser.add_argument('--workers', type=int, default=1, help='number of CPUs')
 argparser.add_argument('--seed', type=int, default=None, help='seed (no seed by default)')
 argparser.add_argument('--type', type=str, default='db', help=f'dataset format to generate: {"|".join(DS_TYPES)} (default: db)')
 argparser.add_argument('--output', type=str, default=None, help='output dataset path')
@@ -36,6 +39,13 @@ argparser.add_argument('--min_neumes_per_line', type=int, default=MIN_NEUMES_PER
 
 
 def validate_args(args: argparse.Namespace) -> bool:
+    cpus = os.cpu_count()
+    if args.workers == 0 or cpus + args.workers < 0:
+        print('cpus are very much needed', file=sys.stderr)
+        return False
+    if args.workers > cpus:
+        print(f'too many workers, {cpus} CPUs available', file=sys.stderr)
+        return False
     if args.type not in ('page', 'line', 'db', 'sdb'):
         print('incorrect dataset type', file=sys.stderr)
         return False
@@ -173,7 +183,7 @@ def gen_page_image_dataset(tex_path: str, label_path: str, outdir_path: str, pag
     with open(os.path.join(outdir_path, 'metadata.json'), 'w') as f:
         json.dump(metadata, f, indent=4)
 
-def create_line_image_dataset(raw_dataset_path: str, outdir_path: str, augmentation_multiplier: int, label_map: dict):
+def create_line_image_dataset(raw_dataset_path: str, outdir_path: str, augmentation_multiplier: int, label_map: dict, workers: int = 1):
     labels_path = os.path.join(raw_dataset_path, LABELS_FILENAME)
     filenames = os.listdir(raw_dataset_path)
     img_filenames = list(sorted([filename for filename in filenames if filename.endswith('.png')]))
@@ -216,25 +226,32 @@ def create_line_image_dataset(raw_dataset_path: str, outdir_path: str, augmentat
     raw_count = 0
     augmented_count = 0
 
+    label_file_lock = Lock()
+
     print('image segmentation and augmentation...')
-    with tqdm(img_filenames) as pbar, open(labels_path, 'r') as lf:
-        for filename in pbar:
-            page_img = cv2.imread(os.path.join(raw_dataset_path, filename))
+    with open(labels_path, 'r') as lf:
+
+        def process_page(img_filename: str):
+            nonlocal lf, label_file_lock
+
+            augmented_count = 0
+
+            page_img = cv2.imread(os.path.join(raw_dataset_path, img_filename))
             line_imgs, neume_counts = get_line_images_with_neume_count(page_img)
             update_max_height(line_imgs)
             page_labels = []
             for count in neume_counts:
                 line_labels = []
                 for _ in range(count):
-                    neume_entry = lf.readline().strip()
-                    if neume_entry == '':
-                        continue
-                    line_labels.append(label_map[neume_entry])
+                    with label_file_lock:
+                        neume_entry = lf.readline().strip()
+                        if neume_entry != '':
+                            line_labels.append(label_map[neume_entry])
                 page_labels.append(np.asarray(line_labels, dtype=np.uint16))
             augmentations = augment_page(page_img, augmentation_multiplier)
 
             line_name_width = dec_width(len(line_imgs))
-            name = filename.split('.')[0]
+            name = img_filename.split('.')[0]
             raw_page_path = os.path.join(raw_path, name)
             os.mkdir(raw_page_path)
             if augmentation_multiplier > 0:
@@ -251,7 +268,19 @@ def create_line_image_dataset(raw_dataset_path: str, outdir_path: str, augmentat
 
                 augmented_count += len(page_line_imgs)
 
-            raw_count += len(line_imgs)
+            return len(line_imgs), augmented_count
+
+        #Parallel(n_jobs=workers, backend='threading')(delayed(process_page)(filename) for filename in tqdm(img_filenames))
+        results = list(tqdm(
+            Parallel(
+                n_jobs=workers,
+                backend='threading',
+                return_as='generator_unordered'
+            )(delayed(process_page)(filename) for filename in img_filenames)
+        ))
+
+    raw_count = sum(map(lambda x: x[0], results))
+    augmented_count = sum(map(lambda x: x[1], results))
 
     with open(os.path.join(raw_dataset_path, 'metadata.json'), 'r') as f:
         metadata = json.load(f)
@@ -416,7 +445,9 @@ def main(args):
         A.ElasticTransform(alpha=3, sigma=40),
         A.GridDistortion(num_steps=7, distort_range=(-0.5, 0.5)),
         A.OpticalDistortion(distort_range=(-0.05, 0.05)),
-        A.GridElasticDeform(num_grid_xy=(16, 16), magnitude=3)
+        A.GridElasticDeform(num_grid_xy=(16, 16), magnitude=3),
+        A.FilmGrain(intensity_range=(0.1, 0.3), grain_size_range=(1, 4), p=0.5),
+        A.SaltAndPepper(amount_range=(0.005, 0.07), salt_vs_pepper_range=(0.35, 0.65), p=0.5)
     ), seed=args.seed)
     if args.seed is not None:
         np.random.seed(args.seed)
@@ -449,7 +480,7 @@ def main(args):
             empty_dir(output_name)
         else:
             os.makedirs(output_name, exist_ok=True)
-        create_line_image_dataset(dataset_path, output_name, args.augment, get_neume_map())
+        create_line_image_dataset(dataset_path, output_name, args.augment, get_neume_map(), args.workers)
         dataset_path = output_name
     if o == 2:
         return 0

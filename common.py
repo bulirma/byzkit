@@ -9,20 +9,21 @@ from torch.utils.data import Dataset
 import math
 import os
 import pickle
+import random
 from typing import Union, List
 import shutil
 
 
 class SplitDataset(Dataset):
-    def __init__(self, lmdb_env: lmdb.Environment, db_prefix: str, transform=None):
+    def __init__(self, lmdb_env: lmdb.Environment, db_prefix: str, transform=None, seed: int = None):
+        random.seed(seed)
         super().__init__()
         self.env = lmdb_env
         self.data_db = self.env.open_db(db_prefix.encode() + b'_data')
         self.targets_db = self.env.open_db(db_prefix.encode() + b'_targets')
         with self.env.begin(write=False) as txn:
             metadata = pickle.loads(txn.get(b'metadata'))
-        #self.samples = metadata[db_prefix]['samples']
-        self.samples = 9520
+        self.samples = metadata[db_prefix]['samples']
         self.max_height = metadata['sample_image_max_height']
         self.key_width = metadata[db_prefix]['key_width']
         self.transform = transform
@@ -32,7 +33,7 @@ class SplitDataset(Dataset):
 
     def pad_vertical(self, img: torch.Tensor, value):
         h = self.max_height - img.size(1)
-        t = h // 2
+        t = random.randint(0, h)
         b = h - t
         return F.pad(img, (0, 0, t, b), mode='constant', value=value)
 
@@ -134,3 +135,34 @@ def empty_dir(path: str):
                 os.unlink(p)
             else:
                 os.remove(p)
+
+def levenshtein_distance(a: torch.Tensor, b: torch.Tensor):
+    sa = a.size(0)
+    sb = b.size(0)
+
+    dists = list(range(sb + 1))
+    for i in range(1, sa + 1):
+        prev_dists = dists
+        dists = [i] + [0] * sb
+        for j in range(1, sb + 1):
+            dists[j] = min(
+                dists[j - 1] + 1,
+                prev_dists[j] + 1,
+                prev_dists[j - 1] + (a[i - 1] != b[j - 1])
+            )
+
+    return dists[sb]
+
+def ser(gold: torch.Tensor, pred: torch.Tensor):
+    assert gold.size(0) == pred.size(0)
+
+    ser_err, ser_total = 0, 0
+    for i in range(gold.size(0)):
+        g = gold[i, :]
+        p = pred[i, :]
+        ser_err += levenshtein_distance(g, p)
+        ser_total += len(g)
+
+    assert ser_total > 0
+    return ser_err / ser_total
+

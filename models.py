@@ -8,9 +8,6 @@ from tqdm import tqdm
 from train import DEVICE
 
 
-#def ctc_greedy_decode(logits, blank=2):
-
-
 class CTCModel(nn.Module):
     def __init__(self, device, num_classes, backbone, rnn_in_dim, rnn_hidden, rnn_layers):
         super().__init__()
@@ -158,8 +155,7 @@ def crnn_ctc_model(classes: int, learning_rate: float, weight_decay: float, img_
         nn.Dropout2d(p=0.2)
     )
     c = 256
-    #height = img_height / 16
-    height = 16
+    height = (img_height - 4) / 16
     model = CTCModel(DEVICE, classes, backbone, int(c * height), 512, 2)
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=150, eta_min=0)

@@ -2,12 +2,16 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
+import random
+
 
 def pad_batch_images(imgs: torch.Tensor, pad_value=0):
     def pad_horizontal(img, w):
         nonlocal pad_value
-        r = w - img.size(2)
-        return F.pad(img, (0, r, 0, 0), mode='constant', value=pad_value)
+        total = w - img.size(2)
+        l = random.randint(0, total)
+        r = total - l
+        return F.pad(img, (l, r, 0, 0), mode='constant', value=pad_value)
 
     max_w = max(map(lambda img: img.size(2), imgs))
     return torch.stack([pad_horizontal(img, max_w) for img in imgs])
