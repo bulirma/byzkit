@@ -30,7 +30,9 @@ def show_sample(txn: lmdb.Transaction, data_db: lmdb._Database, targets_db: lmdb
     label = np.load(target_buf, allow_pickle=False)['target']
     label_neume_imgs = [NEUME_IMGS[i] for i in label]
     label_img = np.concatenate(label_neume_imgs, axis=1)
-    plt_show_column_grid([label_img, img], ['label', 'sample'], 1)
+    label_img = cv2.cvtColor(label_img, cv2.COLOR_BGR2RGB)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    plt_show_column_grid([label_img, img], ['label', 'image'], 1)
 
 def demo_db_dataset(dataset_path: str, metadata: dict):
     env = lmdb.open(dataset_path, max_dbs=4)

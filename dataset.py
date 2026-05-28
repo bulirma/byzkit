@@ -12,7 +12,6 @@ import os
 import shutil
 import subprocess
 import sys
-from threading import Lock
 
 from common import dec_width, is_existing_dir, empty_dir
 from neume import NeumeGenerator, load_classes
@@ -23,6 +22,9 @@ LINES_PER_PAGE = 12
 MIN_NEUMES_PER_LINE = 7
 MAX_NEUMES_PER_LINE = 15
 LABELS_FILENAME = 'labels.txt'
+TEX_FILENAME = 'page.tex'
+DOCUMENT_FILENAME = 'page.pdf'
+IMAGE_FILENAME = 'page.png'
 DS_TYPES = ['page', 'line', 'db', 'sdb']
 DS_RESERVED_NAMES = ['ds_page', 'ds_line', 'ds.lmdb']
 
@@ -98,6 +100,10 @@ def get_split(split_arg_str: str) -> tuple:
         split = (1, 0, 0)
     return split
 
+def get_neume_map():
+    classes = load_classes()
+    return { c: i for i, c in enumerate(classes) }
+
 def init_document(document_path: str):
     template_lines = []
     with open('byztex/template_standalone.tex', 'r') as f:
@@ -118,19 +124,6 @@ def typeset_document(document_path: str):
     os.remove(document_path.replace('.tex', '.aux'))
     os.remove(document_path.replace('.tex', '.log'))
 
-def convert(document_path: str, outdir_path: str, pages: int):
-    filename_width = dec_width(pages)
-
-    print('converting pdf to an image...')
-    with tqdm(range(1, pages + 1)) as pbar:
-        for p in pbar:
-            page = convert_from_path(document_path, first_page=p, last_page=p)[0]
-            page.save(os.path.join(outdir_path, f'{str(p).zfill(filename_width)}.png'), 'PNG')
-
-def get_neume_map():
-    classes = load_classes()
-    return { c: i for i, c in enumerate(classes) }
-
 def augment_page(page_img: cv2.Mat, mult: int):
     augmentations = []
     for _ in range(mult):
@@ -149,47 +142,73 @@ def augment_page(page_img: cv2.Mat, mult: int):
         augmentations.append(line_imgs)
     return augmentations
 
-def gen_page_image_dataset(tex_path: str, label_path: str, outdir_path: str, pages: int, min_neumes_per_line: int, seed: int):
-    print('generating lualatex document...')
+def gen_page_image(outdir_path: str, neume_generator: NeumeGenerator, min_neumes_per_line: int):
+    tex_path = os.path.join(outdir_path, TEX_FILENAME)
+    labels_path = os.path.join(outdir_path, LABELS_FILENAME)
+    doc_path = os.path.join(outdir_path, DOCUMENT_FILENAME)
+
     init_document(tex_path)
-    generator = NeumeGenerator(seed=seed)
 
-    with open(tex_path, 'a') as tex_file, open(label_path, 'a') as label_file:
-        with tqdm(range(pages)) as pbar:
-            for p in pbar:
-                for l in range(LINES_PER_PAGE):
-                    for _ in range(np.random.randint(min_neumes_per_line, MAX_NEUMES_PER_LINE + 1)):
-                        neume = generator.next()
-                        tex_file.write(f'\\{neume} \\allowbreak{os.linesep}')
-                        label_file.write(f'{neume}{os.linesep}')
-                    if not (p == pages - 1 and l == LINES_PER_PAGE - 1):
-                        tex_file.write(f'\\newline{os.linesep}')
-
+    with open(tex_path, 'a') as tex_file, open(labels_path, 'w') as label_file:
+        for l in range(LINES_PER_PAGE):
+            for _ in range(np.random.randint(min_neumes_per_line, MAX_NEUMES_PER_LINE + 1)):
+                neume = neume_generator.next()
+                tex_file.write(f'\\{neume} \\allowbreak{os.linesep}')
+                label_file.write(f'{neume}{os.linesep}')
+            tex_file.write(f'\\newline{os.linesep}')
         tex_file.write(os.linesep)
         tex_file.write('\\end{document}')
 
-    print('typesetting lualatex document...')
     typeset_document(tex_path)
-    convert(tex_path.replace('.tex', '.pdf'), outdir_path, pages)
+    page = convert_from_path(doc_path, first_page=1, last_page=1)[0]
+    page.save(os.path.join(outdir_path, IMAGE_FILENAME), 'PNG')
 
-    # cleaning
     os.remove(tex_path)
-    os.remove(tex_path.replace('.tex', '.pdf'))
+    os.remove(doc_path)
+
+def gen_page_image_dataset(outdir_path: str, pages: int, min_neumes_per_line: int, seed: int):
+    print('generating page dataset...')
+    generator = NeumeGenerator(seed=seed)
+
+    name_width = dec_width(pages)
+    with tqdm(range(1, pages + 1)) as pbar:
+        for p in pbar:
+            page_name = str(p).zfill(name_width)
+            page_path = os.path.join(outdir_path, page_name)
+            os.mkdir(page_path)
+            gen_page_image(page_path, generator, min_neumes_per_line)
 
     metadata = {
         'ds_type': 'page',
+        'seed': seed,
         'pages': pages
     }
     with open(os.path.join(outdir_path, 'metadata.json'), 'w') as f:
         json.dump(metadata, f, indent=4)
 
-def create_line_image_dataset(raw_dataset_path: str, outdir_path: str, augmentation_multiplier: int, label_map: dict, workers: int = 1):
-    labels_path = os.path.join(raw_dataset_path, LABELS_FILENAME)
-    filenames = os.listdir(raw_dataset_path)
-    img_filenames = list(sorted([filename for filename in filenames if filename.endswith('.png')]))
+def create_line_image(
+    indir_path: str,
+    outdir_raw_path: str,
+    outdir_augmented_path: str,
+    augmentation_multiplier: int,
+    label_map: dict
+) -> tuple:
+    image_path = os.path.join(indir_path, IMAGE_FILENAME)
+    labels_path = os.path.join(indir_path, LABELS_FILENAME)
+
+    augmentation_width = dec_width(augmentation_multiplier) if augmentation_multiplier > 0 else 0
+
+    with open(labels_path, 'r') as lf:
+        labels = lf.readlines()
+
+    labels = list(map(lambda x: x.strip(), labels))
+
+    page_img = cv2.imread(image_path)
+    line_imgs, neume_counts = get_line_images_with_neume_count(page_img)
+
+    page_order_width = dec_width(len(line_imgs))
 
     max_height = 0
-    augmentation_width = dec_width(augmentation_multiplier) if augmentation_multiplier > 0 else 0
 
     def update_max_height(page_line_imgs: list):
         nonlocal max_height
@@ -197,93 +216,85 @@ def create_line_image_dataset(raw_dataset_path: str, outdir_path: str, augmentat
         if page_max_height > max_height:
             max_height = page_max_height
 
-    def get_name(idx: int, augmentation: int, name_width: int):
-        nonlocal augmentation_width
-        name = str(idx + 1).zfill(name_width)
+    def get_path_prefix(idx: int, augmentation: int):
+        nonlocal outdir_raw_path, outdir_augmented_path, augmentation_width, page_order_width
+        page_order = str(idx + 1).zfill(page_order_width)
         if augmentation > 0:
-            name = f'{str(augmentation).zfill(augmentation_width)}a{name}'
-        return name
+            name = f'{str(augmentation).zfill(augmentation_width)}a{page_order}'
+            path_prefix = os.path.join(outdir_augmented_path, name)
+        else:
+            path_prefix = os.path.join(outdir_raw_path, page_order)
+        return path_prefix
 
-    def save_data(outdir_path: str, name_width: int, page_line_imgs: list, augmentation: int = 0):
+    def save_data(page_line_imgs: list, augmentation: int = 0):
         for idx, line_img in enumerate(page_line_imgs):
-            name = get_name(idx, augmentation, name_width)
-            file_path = os.path.join(outdir_path, name + '.png')
+            file_path_prefix = get_path_prefix(idx, augmentation)
+            file_path = file_path_prefix + '.png'
             cv2.imwrite(file_path, line_img)
 
-    def save_targets(outdir_path: str, name_width: int, page_line_labels: list, augmentation: int = 0):
+    def save_targets(page_line_labels: list, augmentation: int = 0):
         nonlocal augmentation_width
         for idx, line_label in enumerate(page_line_labels):
-            name = get_name(idx, augmentation, name_width)
-            file_path = os.path.join(outdir_path, name + '.npz')
+            file_path_prefix = get_path_prefix(idx, augmentation)
+            file_path = file_path_prefix + '.npz'
             np.savez_compressed(file_path, target=line_label)
 
-    raw_path = os.path.join(outdir_path, 'raw')
-    augmented_path = os.path.join(outdir_path, 'augmented')
-    os.mkdir(raw_path)
+    update_max_height(line_imgs)
+    label_idx = 0
+    page_labels = []
+    for count in neume_counts:
+        line_labels = [label_map[label] for label in labels[label_idx: label_idx + count]]
+        page_labels.append(np.asarray(line_labels, dtype=np.uint16))
+        label_idx += count
+    augmentations = augment_page(page_img, augmentation_multiplier)
+
+    save_data(line_imgs)
+    save_targets(page_labels)
+
+    for a, page_line_imgs in enumerate(augmentations):
+        update_max_height(page_line_imgs)
+        save_data(page_line_imgs, a + 1)
+        save_targets(page_labels, a + 1)
+
+    return max_height, len(line_imgs)
+
+def create_line_image_dataset(page_dataset_path: str, outdir_path: str, augmentation_multiplier: int, label_map: dict, workers: int = 1):
+    raw_path_prefix = os.path.join(outdir_path, 'raw')
+    augmented_path_prefix = os.path.join(outdir_path, 'augmented')
+
+    with open(os.path.join(page_dataset_path, 'metadata.json'), 'r') as f:
+        metadata = json.load(f)
+
+    pages = metadata['pages']
+
+    os.mkdir(raw_path_prefix)
     if augmentation_multiplier > 0:
-        os.mkdir(augmented_path)
+        os.mkdir(augmented_path_prefix)
 
-    raw_count = 0
-    augmented_count = 0
+    page_name_width = dec_width(pages)
 
-    label_file_lock = Lock()
+    def create_input(page_num: int) -> tuple:
+        nonlocal page_dataset_path, raw_path_prefix, augmented_path_prefix, page_name_width, augmentation_multiplier, label_map
+        page_name = str(page_num).zfill(page_name_width)
+        indir_path = os.path.join(page_dataset_path, page_name)
+        outdir_raw_path = os.path.join(raw_path_prefix, page_name)
+        outdir_augmented_path = os.path.join(augmented_path_prefix, page_name)
+        os.makedirs(outdir_raw_path, exist_ok=True)
+        os.makedirs(outdir_augmented_path, exist_ok=True)
+        return (indir_path, outdir_raw_path, outdir_augmented_path, augmentation_multiplier, label_map)
 
     print('image segmentation and augmentation...')
-    with open(labels_path, 'r') as lf:
+    results = list(tqdm(
+        Parallel(
+            n_jobs=workers,
+            backend='threading',
+            return_as='generator_unordered'
+        )(delayed(create_line_image)(*create_input(p)) for p in range(1, pages + 1))
+    ))
 
-        def process_page(img_filename: str):
-            nonlocal lf, label_file_lock
-
-            augmented_count = 0
-
-            page_img = cv2.imread(os.path.join(raw_dataset_path, img_filename))
-            line_imgs, neume_counts = get_line_images_with_neume_count(page_img)
-            update_max_height(line_imgs)
-            page_labels = []
-            with label_file_lock:
-                for count in neume_counts:
-                    line_labels = []
-                    for _ in range(count):
-                        neume_entry = lf.readline().strip()
-                        if neume_entry != '':
-                            line_labels.append(label_map[neume_entry])
-                    page_labels.append(np.asarray(line_labels, dtype=np.uint16))
-            augmentations = augment_page(page_img, augmentation_multiplier)
-
-            line_name_width = dec_width(len(line_imgs))
-            name = img_filename.split('.')[0]
-            raw_page_path = os.path.join(raw_path, name)
-            os.mkdir(raw_page_path)
-            if augmentation_multiplier > 0:
-                augmented_page_path = os.path.join(augmented_path, name)
-                os.mkdir(augmented_page_path)
-
-            save_data(raw_page_path, line_name_width, line_imgs)
-            save_targets(raw_page_path, line_name_width, page_labels)
-
-            for a, page_line_imgs in enumerate(augmentations):
-                update_max_height(page_line_imgs)
-                save_data(augmented_page_path, line_name_width, page_line_imgs, a + 1)
-                save_targets(augmented_page_path, line_name_width, page_labels, a + 1)
-
-                augmented_count += len(page_line_imgs)
-
-            return len(line_imgs), augmented_count
-
-        #Parallel(n_jobs=workers, backend='threading')(delayed(process_page)(filename) for filename in tqdm(img_filenames))
-        results = list(tqdm(
-            Parallel(
-                n_jobs=workers,
-                backend='threading',
-                return_as='generator_unordered'
-            )(delayed(process_page)(filename) for filename in img_filenames)
-        ))
-
-    raw_count = sum(map(lambda x: x[0], results))
-    augmented_count = sum(map(lambda x: x[1], results))
-
-    with open(os.path.join(raw_dataset_path, 'metadata.json'), 'r') as f:
-        metadata = json.load(f)
+    max_height = max(map(lambda x: x[0], results))
+    raw_count = sum(map(lambda x: x[1], results))
+    augmented_count = raw_count * augmentation_multiplier
 
     metadata = {
         **metadata,
@@ -464,13 +475,11 @@ def main(args):
     if i == 0:
         output_name = args.output if o == 1 else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[0])
         output_name = os.path.join(os.path.dirname(__file__), output_name)
-        tex_path = f'{output_name}.tex'
         if is_existing_dir(output_name):
             empty_dir(output_name)
         else:
             os.makedirs(output_name, exist_ok=True)
-        label_path = os.path.join(output_name, LABELS_FILENAME)
-        gen_page_image_dataset(tex_path, label_path, output_name, args.pages, args.min_neumes_per_line, args.seed)
+        gen_page_image_dataset(output_name, args.pages, args.min_neumes_per_line, args.seed)
         dataset_path = output_name
     if o == 1:
         return 0
