@@ -34,7 +34,7 @@ argparser.add_argument('--seed', type=int, default=None, help='seed (no seed by 
 argparser.add_argument('--type', type=str, default='db', help=f'dataset format to generate: {"|".join(DS_TYPES)} (default: db)')
 argparser.add_argument('--output', type=str, default=None, help='output dataset path')
 argparser.add_argument('--input', type=str, default=None, help='input dataset path')
-argparser.add_argument('--pages', type=int, default=10_000, help='number of pages to be generated for the page dataset')
+argparser.add_argument('--pages', type=int, default=1_000, help='number of pages to be generated for the page dataset')
 argparser.add_argument('--augment', type=int, default=0, help='page augmentation multiplicator (no augmentation when 0)')
 argparser.add_argument('--split', type=str, default=None, help='split of pickle dataset (fmt: train,test or train,val,test')
 argparser.add_argument('--min_neumes_per_line', type=int, default=MIN_NEUMES_PER_LINE, help='minimum number of neumes per line')
@@ -104,6 +104,18 @@ def get_neume_map():
     classes = load_classes()
     return { c: i for i, c in enumerate(classes) }
 
+def setup_augmentation(seed: int):
+    global augment
+    augment = A.Compose((
+        A.Rotate(angle_range=(-3, 3), p=0.5, crop_border=True),
+        A.ElasticTransform(alpha=3, sigma=40),
+        A.GridDistortion(num_steps=7, distort_range=(-0.5, 0.5)),
+        A.OpticalDistortion(distort_range=(-0.05, 0.05)),
+        A.GridElasticDeform(num_grid_xy=(16, 16), magnitude=3),
+        A.FilmGrain(intensity_range=(0.1, 0.3), grain_size_range=(1, 4), p=0.5),
+        A.SaltAndPepper(amount_range=(0.005, 0.07), salt_vs_pepper_range=(0.35, 0.65), p=0.5)
+    ), seed=seed)
+
 def init_document(document_path: str):
     template_lines = []
     with open('byztex/template_standalone.tex', 'r') as f:
@@ -167,6 +179,9 @@ def gen_page_image(outdir_path: str, neume_generator: NeumeGenerator, min_neumes
     os.remove(doc_path)
 
 def gen_page_image_dataset(outdir_path: str, pages: int, min_neumes_per_line: int, seed: int):
+    if seed is None:
+        seed = np.random.randint(np.iinfo(np.uint32).max)
+
     print('generating page dataset...')
     generator = NeumeGenerator(seed=seed)
 
@@ -258,12 +273,22 @@ def create_line_image(
 
     return max_height, len(line_imgs)
 
-def create_line_image_dataset(page_dataset_path: str, outdir_path: str, augmentation_multiplier: int, label_map: dict, workers: int = 1):
-    raw_path_prefix = os.path.join(outdir_path, 'raw')
-    augmented_path_prefix = os.path.join(outdir_path, 'augmented')
-
+def create_line_image_dataset(
+    page_dataset_path: str,
+    outdir_path: str,
+    augmentation_multiplier: int,
+    label_map: dict,
+    workers: int = 1
+):
     with open(os.path.join(page_dataset_path, 'metadata.json'), 'r') as f:
         metadata = json.load(f)
+
+    seed = metadata['seed']
+
+    setup_augmentation(seed)
+
+    raw_path_prefix = os.path.join(outdir_path, 'raw')
+    augmented_path_prefix = os.path.join(outdir_path, 'augmented')
 
     pages = metadata['pages']
 
@@ -410,7 +435,6 @@ def create_split_database(db_dataset_path: str, sdb_dataset_path: str, db_env: l
             'samples': count,
             'key_width': key_width
         }
-
         print(f'storing {metadata_name} samples...')
 
         with db_env.begin(write=False) as in_txn, sdb_env.begin(write=True) as out_txn, tqdm(range(count)) as pbar:
@@ -425,18 +449,19 @@ def create_split_database(db_dataset_path: str, sdb_dataset_path: str, db_env: l
 
     print('storing augmented samples...')
     
-    metadata['train']['samples'] += augmented_count
+    train_samples = metadata['train']['samples']
     match_key_width = metadata['augmented']['key_width']
     key_width = metadata['train']['key_width']
     with db_env.begin(write=False) as in_txn, sdb_env.begin(write=True) as out_txn, tqdm(range(augmented_count)) as pbar:
         for i in pbar:
             match_key = str(i).zfill(match_key_width).encode()
-            key = str(begin + i).zfill(key_width).encode()
+            key = str(train_samples + i).zfill(key_width).encode()
             data_value = in_txn.get(match_key, db=augmented_data_db)
             target_value = in_txn.get(match_key, db=augmented_targets_db)
-            out_txn.put(key, data_value, db=db_pair[0])
-            out_txn.put(key, target_value, db=db_pair[1])
+            out_txn.put(key, data_value, db=train_data_db)
+            out_txn.put(key, target_value, db=train_targets_db)
 
+    metadata['train']['samples'] += augmented_count
     metadata['raw'].pop('key_width')
     metadata['augmented'].pop('key_width')
 
@@ -445,23 +470,10 @@ def create_split_database(db_dataset_path: str, sdb_dataset_path: str, db_env: l
 
 
 def main(args):
-    global augment
-
     are_valid = validate_args(args)
     if not are_valid:
         return 1
 
-    augment = A.Compose((
-        A.Rotate(angle_range=(-3, 3), p=0.5, crop_border=True),
-        A.ElasticTransform(alpha=3, sigma=40),
-        A.GridDistortion(num_steps=7, distort_range=(-0.5, 0.5)),
-        A.OpticalDistortion(distort_range=(-0.05, 0.05)),
-        A.GridElasticDeform(num_grid_xy=(16, 16), magnitude=3),
-        A.FilmGrain(intensity_range=(0.1, 0.3), grain_size_range=(1, 4), p=0.5),
-        A.SaltAndPepper(amount_range=(0.005, 0.07), salt_vs_pepper_range=(0.35, 0.65), p=0.5)
-    ), seed=args.seed)
-    if args.seed is not None:
-        np.random.seed(args.seed)
     db_size = args.pages * (1 + args.augment) * LINES_PER_PAGE * 1024 ** 2
 
     dataset_path = args.input
@@ -514,6 +526,8 @@ def main(args):
     split = get_split(args.split)
 
     create_split_database(dataset_path, output_name, db_env, sdb_env, split)
+
+    sdb_env.close()
 
     return 0
 

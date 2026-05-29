@@ -8,7 +8,6 @@ import argparse
 from datetime import datetime
 import json
 import os
-import pickle
 import sys
 
 from common import SplitDataset
@@ -40,11 +39,8 @@ def main(args: argparse.Namespace):
 
     env = lmdb.open(args.dataset, max_dbs=6)
 
-    with env.begin(write=False) as txn:
-        metadata = pickle.loads(txn.get(b'metadata'))
-
-    print(metadata)
-    return 1
+    with open(os.path.join(args.dataset, 'metadata.json'), 'r') as f:
+        metadata = json.load(f)
 
     num_classes = len(metadata['label_map'])
     max_heihgt = metadata['sample_image_max_height']
@@ -54,23 +50,27 @@ def main(args: argparse.Namespace):
         transforms.ToDtype(torch.float32, scale=True)
     ))
 
-    train_dataset = SplitDataset(env, 'train', transform)
-    #val_dataset = SplitDataset(env, 'val', transform)
-    test_dataset = SplitDataset(env, 'test', transform)
+    train_dataset = SplitDataset(env, metadata, 'train', transform)
+    val_dataset = SplitDataset(env, metadata, 'val', transform)
+    test_dataset = SplitDataset(env, metadata, 'test', transform)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate)
+    if len(val_dataset) > 0:
+        val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
     if len(test_dataset) > 0:
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
 
     model = models.crnn_ctc_model(num_classes, learning_rate, weight_decay, max_heihgt)
 
     train_begin = datetime.now()
-    logs = model.fit(args.epochs, train_loader)
+    logs = model.fit(args.epochs, train_loader, val_loader if len(val_dataset) > 0 else None)
     train_end = datetime.now()
 
     result = None
     if len(test_dataset) > 0:
         result = model.evaluate(test_loader)
+
+    env.close()
 
     metadata_record = {
         'train_logs': logs,

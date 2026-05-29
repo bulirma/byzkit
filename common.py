@@ -6,23 +6,21 @@ import torch
 from torch.nn import functional as F
 from torch.utils.data import Dataset
 
+import io
 import math
 import os
-import pickle
 import random
 from typing import Union, List
 import shutil
 
 
 class SplitDataset(Dataset):
-    def __init__(self, lmdb_env: lmdb.Environment, db_prefix: str, transform=None, seed: int = None):
+    def __init__(self, lmdb_env: lmdb.Environment, metadata: dict, db_prefix: str, transform=None, seed: int = None):
         random.seed(seed)
         super().__init__()
         self.env = lmdb_env
         self.data_db = self.env.open_db(db_prefix.encode() + b'_data')
         self.targets_db = self.env.open_db(db_prefix.encode() + b'_targets')
-        with self.env.begin(write=False) as txn:
-            metadata = pickle.loads(txn.get(b'metadata'))
         self.samples = metadata[db_prefix]['samples']
         self.max_height = metadata['sample_image_max_height']
         self.key_width = metadata[db_prefix]['key_width']
@@ -54,7 +52,8 @@ class SplitDataset(Dataset):
             data = self.pad_vertical(data, 1.0)
         else:
             data = self.pad_vertical(data, 255)
-        target = torch.from_numpy(pickle.loads(target_value))
+        target_buf = io.BytesIO(target_value)
+        target = torch.from_numpy(np.load(target_buf, allow_pickle=False)['target'])
         return data, target
 
 
@@ -152,17 +151,3 @@ def levenshtein_distance(a: torch.Tensor, b: torch.Tensor):
             )
 
     return dists[sb]
-
-def ser(gold: torch.Tensor, pred: torch.Tensor):
-    assert gold.size(0) == pred.size(0)
-
-    ser_err, ser_total = 0, 0
-    for i in range(gold.size(0)):
-        g = gold[i, :]
-        p = pred[i, :]
-        ser_err += levenshtein_distance(g, p)
-        ser_total += len(g)
-
-    assert ser_total > 0
-    return ser_err / ser_total
-

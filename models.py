@@ -7,6 +7,8 @@ from tqdm import tqdm
 
 from train import DEVICE
 
+from common import levenshtein_distance
+
 
 class CTCModel(nn.Module):
     def __init__(self, device, num_classes, backbone, rnn_in_dim, rnn_hidden, rnn_layers):
@@ -17,6 +19,7 @@ class CTCModel(nn.Module):
         self.backbone.to(device)
         self.to(device)
         self.device = device
+        self.num_classes = num_classes
 
     def forward(self, x):
         b, c, h, w = x.size()
@@ -33,16 +36,25 @@ class CTCModel(nn.Module):
         self.scheduler = scheduler
         self.loss = loss
         self.test_loss = metrics.get('loss').to(self.device)
+        self.val_loss = metrics.get('val_loss').to(self.device)
 
-    def fit(self, epochs: int, train_loader: DataLoader):
-        self.train()
+    def greedy_decode(self, logits: torch.Tensor):
+        symbols = torch.argmax(logits, dim=1)
+        collapsed = [symbols[0]]
+        for symbol in symbols[1:]:
+            if symbol != collapsed[-1]:
+                collapsed.append(symbol)
+        return torch.tensor([symbol.item() for symbol in collapsed if symbol != self.num_classes], dtype=torch.long)
 
+    def fit(self, epochs: int, train_loader: DataLoader, val_loader: DataLoader = None):
         logs = []
 
         for e in range(1, epochs + 1):
 
             if self.test_loss is not None:
                 self.test_loss.reset()
+
+            self.train()
 
             with tqdm(train_loader, unit='batch', desc=f'epoch {e}/{epochs}') as pbar:
 
@@ -68,8 +80,44 @@ class CTCModel(nn.Module):
                     pbar.set_postfix(loss=loss, lr=lr)
 
             log = {
-                'loss': self.test_loss.compute().item()
+                'loss': self.test_loss.compute().item(),
+                'lr': self.optimizer.param_groups[0]['lr']
             }
+
+            if val_loader is not None:
+
+                ser_err = 0
+                ser_total = 0
+                if self.val_loss is not None:
+                    self.val_loss.reset()
+
+                self.eval()
+                with tqdm(val_loader, unit='batch', desc=f'epoch {e}/{epochs}') as pbar:
+
+                    for images, targets in pbar:
+                        images = images.to(self.device)
+                        targets = targets.to(self.device)
+
+                        predictions = self(images)
+                        loss = self.loss(predictions, targets)
+
+                        self.val_loss.update(loss)
+
+                        decoded = self.greedy_decode(predictions)
+                        ser_err += levenshtein_distance(targets, decoded)
+                        ser_total += targets.size(0)
+
+                        ser = ser_err / ser_total if ser_total > 0 else None
+                        loss = None if self.validation_loss is None else f'{self.validation_loss.compute().item():.4f}'
+
+                        pbar.set_postfix(loss=loss, ser=ser)
+
+                log = {
+                    **log,
+                    'val_loss': self.val_loss.compute().item() if self.val_loss is not None else None,
+                    'ser': ser_err / ser_total if ser_total > 0 else None
+                }
+
             logs.append(log)
 
         return logs
@@ -101,14 +149,6 @@ class CTCModel(nn.Module):
         image = image.to(self.device)
         return self(image)
 
-
-def ctc_greedy_decode(logits: torch.Tensor):
-    symbols = torch.argmax(logits, dim=1)
-    collapsed = [symbols[0]]
-    for symbol in symbols[1:]:
-        if symbol != collapsed[-1]:
-            collapsed.append(symbol)
-    return [symbol.item() for symbol in collapsed if symbol != 2]
 
 def crnn_ctc_model(classes: int, learning_rate: float, weight_decay: float, img_height: int):
     backbone = nn.Sequential(
@@ -162,9 +202,10 @@ def crnn_ctc_model(classes: int, learning_rate: float, weight_decay: float, img_
     model.configure(
         optimizer,
         scheduler,
-        nn.CTCLoss(blank=2, reduction='mean', zero_infinity=True),
+        nn.CTCLoss(blank=classes, reduction='mean', zero_infinity=True),
         { 
             'loss': MeanMetric('error', dist_sync_on_step=False),
+            'val_loss': MeanMetric('error', dist_sync_on_step=False),
         }
     )
     return torch.compile(model)
