@@ -76,5 +76,11 @@
     "NoligonElafronKentimata"          : "OligonPlusElaphronPlusKentemata",
     "NoligonRunningElafronKentimata"   : "OligonPlusRunningElaphronPlusKentemata",
     "NoligonElafronApostrofosKentimata": "OligonPlusElaphronPlusApostrophosPlusKentemata",
-    "NoligonChamiliKentimata"          : "OligonPlusHamiliPlusKentemata"
+    "NoligonChamiliKentimata"          : "OligonPlusHamiliPlusKentemata",
+    "NbarlineSingle"                   : "MeasureBarRight",
+    "NbarlineDouble"                   : "MeasureBarDouble",
+    "NbarlineTheseos"                  : "MeasureBarTheseos",
+    "NbarlineShortSingle"              : "MeasureBarTop",
+    "NbarlineShortDouble"              : "MeasureBarShortDouble",
+    "NbarlineShortTheseos"             : "MeasureBarShortTheseos"
 }
