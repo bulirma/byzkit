@@ -5,8 +5,6 @@ from torch.utils.data import DataLoader
 from torchmetrics import MeanMetric
 from tqdm import tqdm
 
-import math
-
 from common import levenshtein_distance
 from train import DEVICE
 
@@ -16,7 +14,7 @@ class CTCModel(nn.Module):
         super().__init__()
         self.backbone = backbone
         self.rnn = nn.LSTM(input_size=rnn_in_dim, hidden_size=rnn_hidden, num_layers=rnn_layers, batch_first=False, bidirectional=True)
-        self.fc = nn.Linear(rnn_hidden * 2, num_classes)
+        self.fc = nn.Linear(rnn_hidden * 2, num_classes + 1)
         self.backbone.to(device)
         self.to(device)
         self.device = device
@@ -43,9 +41,9 @@ class CTCModel(nn.Module):
         symbols = torch.argmax(logits, dim=1)
         collapsed = [symbols[0]]
         for symbol in symbols[1:]:
-            if symbol != collapsed[-1]:
+            if symbol.item() != collapsed[-1].item():
                 collapsed.append(symbol)
-        return torch.tensor([symbol.item() for symbol in collapsed if symbol != self.num_classes], dtype=torch.long)
+        return torch.tensor([symbol.item() for symbol in collapsed if symbol.item() != self.num_classes], dtype=torch.long)
 
     def fit(self, epochs: int, train_loader: DataLoader, val_loader: DataLoader = None):
         logs = []
@@ -95,16 +93,18 @@ class CTCModel(nn.Module):
                 self.eval()
                 with tqdm(val_loader, unit='batch', desc=f'epoch {e}/{epochs}') as pbar:
 
-                    for images, targets in pbar:
+                    for images, targets, lengths in pbar:
                         images = images.to(self.device)
                         targets = targets.to(self.device)
 
-                        predictions = self(images)
-                        loss = self.loss(predictions, targets)
+                        logits = self(images)
+                        log_probs = F.log_softmax(logits, dim=2)
+                        in_lengths = torch.full((logits.size(1),), logits.size(0), dtype=torch.long)
+                        loss = self.loss(log_probs, targets, in_lengths, lengths)
 
                         self.val_loss.update(loss)
 
-                        decoded = self.greedy_decode(predictions)
+                        decoded = self.greedy_decode(logits)
                         ser_err += levenshtein_distance(targets, decoded)
                         ser_total += targets.size(0)
 
@@ -118,6 +118,9 @@ class CTCModel(nn.Module):
                     'val_loss': self.val_loss.compute().item() if self.val_loss is not None else None,
                     'ser': ser_err / ser_total if ser_total > 0 else None
                 }
+
+                if torch.cuda.is_available():
+                    torch.cuda.clear_cache()
 
             logs.append(log)
 

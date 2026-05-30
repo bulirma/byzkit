@@ -34,6 +34,8 @@ def main(args: argparse.Namespace):
         print('model path is required', file=sys.stderr)
         return 1
 
+    os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
     learning_rate = 0.001
     weight_decay = 1e-4
 
@@ -63,28 +65,40 @@ def main(args: argparse.Namespace):
     model = models.crnn_ctc_model(num_classes, learning_rate, weight_decay, max_heihgt)
 
     train_begin = datetime.now()
+    #try:
+    #    logs = model.fit(args.epochs, train_loader, val_loader if len(val_dataset) > 0 else None)
+    #    error = None
+    #except Exception as e:
+    #    logs = None
+    #    error = str(e)
     logs = model.fit(args.epochs, train_loader, val_loader if len(val_dataset) > 0 else None)
+    error = None
     train_end = datetime.now()
 
     result = None
-    if len(test_dataset) > 0:
+    if len(test_dataset) > 0 and logs is not None:
         result = model.evaluate(test_loader)
 
     env.close()
 
     metadata_record = {
         'train_logs': logs,
-        'training_time': train_end - train_begin,
-        'evaluation_result': result
+        'training_time': (train_end - train_begin).total_seconds(),
+        'evaluation_result': result,
+        'cuda_mem_summary': torch.cuda.memory_summary() if torch.cuda.is_available() else None,
+        'error': error
     }
 
-    os.makedirs(model, exist_ok=True)
-    model_state = {k: v.cpu().numpy() for k, v in model.state_dict().items()}
-    np.savez_compressed(os.path.join(args.model, 'state.npz'), **model_state)
+    os.makedirs(args.model, exist_ok=True)
+
+    if logs is not None:
+        model_state = {k: v.cpu().numpy() for k, v in model.state_dict().items()}
+        np.savez_compressed(os.path.join(args.model, 'state.npz'), **model_state)
+
     with open(os.path.join(args.model, 'metadata.json'), 'w') as f:
         json.dump(metadata_record, f, indent=4)
 
-    return 0
+    return 1 if logs is None else 0
 
 
 if __name__ == '__main__':
