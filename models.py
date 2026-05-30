@@ -38,12 +38,18 @@ class CTCModel(nn.Module):
         self.val_loss = metrics.get('val_loss').to(self.device)
 
     def greedy_decode(self, logits: torch.Tensor):
-        symbols = torch.argmax(logits, dim=1)
-        collapsed = [symbols[0]]
-        for symbol in symbols[1:]:
-            if symbol.item() != collapsed[-1].item():
-                collapsed.append(symbol)
-        return torch.tensor([symbol.item() for symbol in collapsed if symbol.item() != self.num_classes], dtype=torch.long)
+        preds = torch.argmax(logits, dim=2)
+        preds = preds.permute(1, 0)
+        decoded = []
+        for b in range(preds.size(0)):
+            seq = preds[b]
+            collapsed = [seq[0]]
+            for s in seq[1:]:
+                if s != collapsed[-1]:
+                    collapsed.append(s)
+            result = torch.tensor([s.item() for s in collapsed if s != self.num_classes], dtype=torch.long)
+            decoded.append(result)
+        return decoded
 
     def fit(self, epochs: int, train_loader: DataLoader, val_loader: DataLoader = None):
         logs = []
@@ -105,11 +111,13 @@ class CTCModel(nn.Module):
                         self.val_loss.update(loss)
 
                         decoded = self.greedy_decode(logits)
-                        ser_err += levenshtein_distance(targets, decoded)
-                        ser_total += targets.size(0)
+                        for b, d in enumerate(decoded):
+                            target = targets[b]
+                            ser_err += levenshtein_distance(target, d)
+                        ser_total += lengths.sum().item()
 
                         ser = ser_err / ser_total if ser_total > 0 else None
-                        loss = None if self.validation_loss is None else f'{self.validation_loss.compute().item():.4f}'
+                        loss = None if self.val_loss is None else f'{self.val_loss.compute().item():.4f}'
 
                         pbar.set_postfix(loss=loss, ser=ser)
 
