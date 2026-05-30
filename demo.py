@@ -1,6 +1,8 @@
 import cv2
 import lmdb
 import numpy as np
+import pygame
+import torch
 
 import argparse
 import io
@@ -20,6 +22,96 @@ NEUME_IMGS = [symmetric_pad(img, 0, NEUME_IMGS_MAX_HEIGHT, 255) for img in NEUME
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--dataset', type=str, default=None, help='dataset path')
+
+
+class Canvas:
+    _point_stroke = {
+        (0, 0): 0
+    }
+    _small_stroke = {
+        (-1, -1): 63,
+        (-1, 1): 63,
+        (1, -1): 63,
+        (1, 1): 63,
+        (-1, 0): 31,
+        (0, -1): 31,
+        (0, 1): 31,
+        (1, 0): 31,
+        (0, 0): 0
+    }
+    _erase_stroke = {
+        (-1, -1): 255,
+        (-1, 1): 255,
+        (1, -1): 255,
+        (1, 1): 255,
+        (-1, 0): 255,
+        (0, -1): 255,
+        (0, 1): 255,
+        (1, 0): 255,
+        (0, 0): 255
+    }
+
+    def __init__(self, screen, x, y, c, scw, sch):
+        self.screen = screen
+        self.x = x + 1
+        self.y = y + 1
+        self.scw = scw
+        self.sch = sch
+        self.sw = self.scw * c
+        self.sh = self.sch * c
+        self.c = c
+        self._stroke = self._small_stroke
+        self._eraser = False
+        self.clear()
+
+    def render(self):
+        pygame.draw.rect(self.screen, (0, 0, 0), (self.x, self.y, self.sw, self.sh), 1)
+        for xi in range(self.scw):
+            sx = xi * self.c + self.x
+            for yi in range(self.sch):
+                if self.image[xi, yi] == 255:
+                    continue
+                sy = yi * self.c + self.y
+                g = self.image[xi, yi]
+                pygame.draw.rect(self.screen, (g, g, g), (sx, sy, self.c, self.c), 0)
+
+    def _is_at(self, x, y):
+        return 0 <= x < self.sw and 0 <= y < self.sh
+
+    def is_at(self, ax, ay):
+        x, y = ax - self.x, ay - self.y
+        return self._is_at(x, y)
+
+    def _apply_stroke(self, xi, yi):
+        for (oxi, oyi), c in self._stroke.items():
+            rxi, ryi = oxi + xi, oyi + yi
+            if rxi < 0 or ryi < 0 or rxi >= self.scw or ryi >= self.sch:
+                continue
+            if self._eraser:
+                self.image[rxi, ryi] |= c
+            else:
+                self.image[rxi, ryi] &= c
+
+    def draw(self, ax, ay):
+        x, y = ax - self.x, ay - self.y
+        xi = x // self.c
+        yi = y // self.c
+        self._apply_stroke(xi, yi)
+
+    def clear(self):
+        self.image = torch.ones((self.scw, self.sch), dtype=torch.uint8) * 255
+
+    def set_point_stroke(self):
+        self._eraser = False
+        self._stroke = self._point_stroke
+
+    def set_small_stroke(self):
+        self._eraser = False
+        self._stroke = self._small_stroke
+
+    def set_erase_stroke(self):
+        self._eraser = True
+        self._stroke = self._erase_stroke
 
 
 def show_sample(txn: lmdb.Transaction, data_db: lmdb._Database, targets_db: lmdb._Database, key: bytes):
@@ -77,6 +169,9 @@ def demo_db_dataset(dataset_path: str, metadata: dict):
 
     env.close()
 
+def demo_model(model_path: str):
+    pygame.init()
+
 def main(args):
     if args.dataset is not None:
         if not is_existing_dir(args.dataset):
@@ -95,6 +190,11 @@ def main(args):
         else:
             print('unsupported dataset type', file=sys.stderr)
             return 1
+    elif args.model is not None:
+        if not is_existing_dir(args.model):
+            print('incorrect model path', file=sys.stderr)
+            return 1
+        demo_model(args.model)
 
     return 0
     

@@ -1,6 +1,6 @@
-metacentrum/install_requirements.sh
 metacentrum/prepare_job.sh
 metacentrum/job_train.pbs
+metacentrum/job_dummy_train.pbs
 metacentrum/job_synth.pbs
 common.py
 dataset.py
@@ -11,3 +11,4 @@ segmentation.py
 train.py
 byztex/template_standalone.tex
 notrack/sds1k.lmdb
+notrack/sds32.lmdb
