@@ -3,6 +3,7 @@ import lmdb
 import numpy as np
 import pygame
 import torch
+from ultralytics import YOLO
 
 import argparse
 import io
@@ -10,7 +11,7 @@ import json
 import os
 import sys
 
-from common import is_existing_dir, plt_show_column_grid
+from common import is_existing_dir, plt_show_column_grid, plt_show
 from img import symmetric_pad
 
 
@@ -22,33 +23,49 @@ NEUME_IMGS = [symmetric_pad(img, 0, NEUME_IMGS_MAX_HEIGHT, 255) for img in NEUME
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--dataset', type=str, default=None, help='dataset path')
+argparser.add_argument('--model', type=str, default=None, help='model path')
+argparser.add_argument('--image', type=str, default=None, help='model path')
 
 
 class Canvas:
     _point_stroke = {
-        (0, 0): (0, 0, 0)
+        (0, 0): torch.tensor((0, 0, 0), dtype=torch.uint8)
+    }
+    _red_point_stroke = {
+        (0, 0): torch.tensor((255, 0, 0), dtype=torch.uint8)
     }
     _small_stroke = {
-        (-1, -1): (63, 63, 63),
-        (-1, 1): (63, 63, 63),
-        (1, -1): (63, 63, 63),
-        (1, 1): (63, 63, 63),
-        (-1, 0): (31, 31, 31),
-        (0, -1): (31, 31, 31),
-        (0, 1): (31, 31, 31),
-        (1, 0): (31, 31, 31),
-        (0, 0):(0, 0, 0) 
+        (-1, -1): torch.tensor((63, 63, 63), dtype=torch.uint8),
+        (-1, 1): torch.tensor((63, 63, 63), dtype=torch.uint8),
+        (1, -1): torch.tensor((63, 63, 63), dtype=torch.uint8),
+        (1, 1): torch.tensor((63, 63, 63), dtype=torch.uint8),
+        (-1, 0): torch.tensor((31, 31, 31), dtype=torch.uint8),
+        (0, -1): torch.tensor((31, 31, 31), dtype=torch.uint8),
+        (0, 1): torch.tensor((31, 31, 31), dtype=torch.uint8),
+        (1, 0): torch.tensor((31, 31, 31), dtype=torch.uint8),
+        (0, 0): torch.tensor((0, 0, 0), dtype=torch.uint8) 
+    }
+    _small_red_stroke = {
+        (-1, -1): torch.tensor((239, 0, 0), dtype=torch.uint8),
+        (-1, 1): torch.tensor((239, 0, 0), dtype=torch.uint8),
+        (1, -1): torch.tensor((239, 0, 0), dtype=torch.uint8),
+        (1, 1): torch.tensor((239, 0, 0), dtype=torch.uint8),
+        (-1, 0): torch.tensor((247, 0, 0), dtype=torch.uint8),
+        (0, -1): torch.tensor((247, 0, 0), dtype=torch.uint8),
+        (0, 1): torch.tensor((247, 0, 0), dtype=torch.uint8),
+        (1, 0): torch.tensor((247, 0, 0), dtype=torch.uint8),
+        (0, 0): torch.tensor((255, 0, 0), dtype=torch.uint8) 
     }
     _erase_stroke = {
-        (-1, -1): (255, 255, 255),
-        (-1, 1): (255, 255, 255),
-        (1, -1): (255, 255, 255),
-        (1, 1): (255, 255, 255),
-        (-1, 0): (255, 255, 255),
-        (0, -1): (255, 255, 255),
-        (0, 1): (255, 255, 255),
-        (1, 0): (255, 255, 255),
-        (0, 0): (255, 255, 255) 
+        (-1, -1): torch.tensor((255, 255, 255), dtype=torch.uint8),
+        (-1, 1): torch.tensor((255, 255, 255), dtype=torch.uint8),
+        (1, -1): torch.tensor((255, 255, 255), dtype=torch.uint8),
+        (1, 1): torch.tensor((255, 255, 255), dtype=torch.uint8),
+        (-1, 0): torch.tensor((255, 255, 255), dtype=torch.uint8),
+        (0, -1): torch.tensor((255, 255, 255), dtype=torch.uint8),
+        (0, 1): torch.tensor((255, 255, 255), dtype=torch.uint8),
+        (1, 0): torch.tensor((255, 255, 255), dtype=torch.uint8),
+        (0, 0): torch.tensor((255, 255, 255), dtype=torch.uint8) 
     }
 
     def __init__(self, screen, x, y, c, scw, sch):
@@ -69,11 +86,11 @@ class Canvas:
         for xi in range(self.scw):
             sx = xi * self.c + self.x
             for yi in range(self.sch):
-                if self.image[xi, yi] == 255:
+                if (self.image[xi, yi] == torch.tensor((255, 255, 255), dtype=torch.uint8)).all():
                     continue
                 sy = yi * self.c + self.y
-                g = self.image[xi, yi]
-                pygame.draw.rect(self.screen, (g, g, g), (sx, sy, self.c, self.c), 0)
+                c = self.image[xi, yi].tolist()
+                pygame.draw.rect(self.screen, c, (sx, sy, self.c, self.c), 0)
 
     def _is_at(self, x, y):
         return 0 <= x < self.sw and 0 <= y < self.sh
@@ -108,6 +125,14 @@ class Canvas:
     def set_small_stroke(self):
         self._eraser = False
         self._stroke = self._small_stroke
+
+    def set_red_point_stroke(self):
+        self._eraser = False
+        self._stroke = self._red_point_stroke
+
+    def set_small_red_stroke(self):
+        self._eraser = False
+        self._stroke = self._small_red_stroke
 
     def set_erase_stroke(self):
         self._eraser = True
@@ -170,7 +195,61 @@ def demo_db_dataset(dataset_path: str, metadata: dict):
     env.close()
 
 def demo_model(model_path: str):
+    GRID_W = 140
+    GRID_H = 28
+    GRID_C = 8
+    GRID_LM = 8
+    GRID_TM = GRID_LM
+    CANVAS_W = GRID_C * GRID_W + 2 * GRID_LM
+    CANVAS_H = GRID_C * GRID_H + 2 * GRID_TM
+
     pygame.init()
+    screen = pygame.display.set_mode((CANVAS_W, CANVAS_H))
+    pygame.display.set_caption('MNIST demo')
+    clock = pygame.time.Clock()
+
+    canvas = Canvas(screen, GRID_LM, GRID_TM, GRID_C, GRID_W, GRID_H)
+
+    running = True
+    while running:
+        screen.fill('white')
+        clock.tick(60)
+
+        canvas.render()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                key = pygame.key.name(event.key)
+                if key == 'c':
+                    canvas.clear()
+                elif key == '1':
+                    canvas.set_point_stroke()
+                elif key == '2':
+                    canvas.set_small_stroke()
+                elif key == '3':
+                    canvas.set_red_point_stroke()
+                elif key == '4':
+                    canvas.set_small_red_stroke()
+                elif key == '0':
+                    canvas.set_erase_stroke()
+
+        left_pressed = pygame.mouse.get_pressed()[0]
+        pos = pygame.mouse.get_pos()
+        if left_pressed and canvas.is_at(*pos):
+            canvas.draw(*pos)
+
+        pygame.display.flip()
+
+    pygame.quit()
+
+def demo_image(model_path: str, image_path: str):
+    img = cv2.imread(image_path)
+    model = YOLO('yolo26n.pt')
+    results = model(img)
+    print(results)
+    
 
 def main(args):
     if args.dataset is not None:
@@ -190,6 +269,15 @@ def main(args):
         else:
             print('unsupported dataset type', file=sys.stderr)
             return 1
+    elif args.image is not None:
+        if not os.path.exists(args.image):
+            print('incorrect image path', file=sys.stderr)
+            return 1
+        if args.model is None or not is_existing_dir(args.model):
+            print('incorrect model path', file=sys.stderr)
+            return 1
+        demo_image(args.model, args.image)
+
     elif args.model is not None:
         if not is_existing_dir(args.model):
             print('incorrect model path', file=sys.stderr)

@@ -3,5 +3,6 @@ __pycache__/
 venv/
 notrack/
 dev-models/
+evaluation/
 
 ocs_*.md

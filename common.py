@@ -36,7 +36,8 @@ class SplitDataset(Dataset):
         return F.pad(img, (0, 0, t, b), mode='constant', value=value)
 
     def __len__(self) -> int:
-        return self.samples
+        #return self.samples
+        return 20
 
     def __getitem__(self, idx: int):
         key = self.key(idx)

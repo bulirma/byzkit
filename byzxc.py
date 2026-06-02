@@ -97,23 +97,11 @@ def validate_args(args: argparse.Namespace) -> bool:
         return False
     return True
 
-
-def main(args: argparse.Namespace) -> int:
-    if not validate_args(args):
-        return 1
-
-    output = args.output if args.output.endswith('.byzx') else args.output + '.byzx'
-
-    if args.dataset is None:
-        return 1
-
-    with open(os.path.join('byztex', 'byzx_map.json'), 'r') as f:
-        byzx_map = json.load(f)
-
-    with open(os.path.join(args.dataset, 'metadata.json'), 'r') as f:
+def convert_dataset(dataset_path: str, output_path: str, byzx_map: dict):
+    with open(os.path.join(dataset_path, 'metadata.json'), 'r') as f:
         dataset_metadata = json.load(f)
 
-    env = lmdb.open(args.dataset, max_dbs=4)
+    env = lmdb.open(dataset_path, max_dbs=4)
     raw_targets_db = env.open_db(b'raw_targets')
     key_width = dataset_metadata['raw']['key_width']
     samples = dataset_metadata['raw']['samples']
@@ -133,7 +121,20 @@ def main(args: argparse.Namespace) -> int:
 
     env.close()
 
-    converter.dump(output)
+    converter.dump(output_path)
+
+
+def main(args: argparse.Namespace) -> int:
+    if not validate_args(args):
+        return 1
+
+    output = args.output if args.output.endswith('.byzx') else args.output + '.byzx'
+
+    with open(os.path.join('byztex', 'byzx_map.json'), 'r') as f:
+        byzx_map = json.load(f)
+
+    if args.dataset is not None:
+        convert_dataset(args.dataset, output, byzx_map)
 
     return 0
 

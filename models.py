@@ -6,6 +6,7 @@ from torchmetrics import MeanMetric
 from tqdm import tqdm
 
 from common import levenshtein_distance
+import math
 from train import DEVICE
 
 
@@ -39,10 +40,10 @@ class CTCModel(nn.Module):
 
     def greedy_decode(self, logits: torch.Tensor):
         preds = torch.argmax(logits, dim=2)
-        preds = preds.permute(1, 0)
+        windows, batches = preds.size()
         decoded = []
-        for b in range(preds.size(0)):
-            seq = preds[b]
+        for b in range(batches):
+            seq = preds[:, b]
             collapsed = [seq[0]]
             for s in seq[1:]:
                 if s != collapsed[-1]:
@@ -50,6 +51,66 @@ class CTCModel(nn.Module):
             result = torch.tensor([s.item() for s in collapsed if s != self.num_classes], dtype=torch.long)
             decoded.append(result)
         return decoded
+
+    def train_step(self, train_loader: DataLoader, epoch: int, epochs: int):
+        self.train()
+
+        with tqdm(train_loader, unit='batch', desc=f'epoch {epoch}/{epochs}') as pbar:
+
+            for images, targets, lengths in pbar:
+                images = images.to(self.device)
+                targets = targets.to(self.device)
+
+                self.optimizer.zero_grad()
+                logits = self(images)
+                log_probs = F.log_softmax(logits, dim=2)
+                in_lengths = torch.full((logits.size(1),), logits.size(0), dtype=torch.long)
+                loss = self.loss(log_probs, targets, in_lengths, lengths)
+                loss.backward()
+                self.optimizer.step()
+                if not isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+                    self.scheduler.step()
+
+                self.test_loss.update(loss)
+
+                loss = None if self.test_loss is None else '{:.4f}'.format(self.test_loss.compute().item())
+                lr = None if self.optimizer is None else '{:.2e}'.format(self.optimizer.param_groups[0]['lr'])
+
+                pbar.set_postfix(loss=loss, lr=lr)
+
+    def validate_step(self, val_loader: DataLoader, epoch: int, epochs: int):
+        self.eval()
+
+        ser_err = 0
+        ser_total = 0
+
+        with tqdm(val_loader, unit='batch', desc=f'epoch {epoch}/{epochs}') as pbar:
+
+            for images, targets, lengths in pbar:
+                images = images.to(self.device)
+                targets = targets.to(self.device)
+
+                logits = self(images)
+                log_probs = F.log_softmax(logits, dim=2)
+                in_lengths = torch.full((logits.size(1),), logits.size(0), dtype=torch.long)
+                loss = self.loss(log_probs, targets, in_lengths, lengths)
+
+                self.val_loss.update(loss)
+
+                decoded = self.greedy_decode(logits)
+                offset = 0
+                for d, l in zip(decoded, lengths):
+                    target = targets[offset: offset + l]
+                    offset += l
+                    ser_err += levenshtein_distance(target, d)
+                ser_total += lengths.sum().item()
+
+                ser = ser_err / ser_total if ser_total > 0 else None
+                loss = None if self.val_loss is None else f'{self.val_loss.compute().item():.4f}'
+
+                pbar.set_postfix(loss=loss, ser=ser)
+
+        return ser_err, ser_total
 
     def fit(self, epochs: int, train_loader: DataLoader, val_loader: DataLoader = None):
         logs = []
@@ -59,30 +120,7 @@ class CTCModel(nn.Module):
             if self.test_loss is not None:
                 self.test_loss.reset()
 
-            self.train()
-
-            with tqdm(train_loader, unit='batch', desc=f'epoch {e}/{epochs}') as pbar:
-
-                for images, targets, lengths in pbar:
-                    images = images.to(self.device)
-                    targets = targets.to(self.device)
-
-                    self.optimizer.zero_grad()
-                    logits = self(images)
-                    log_probs = F.log_softmax(logits, dim=2)
-                    in_lengths = torch.full((logits.size(1),), logits.size(0), dtype=torch.long)
-                    loss = self.loss(log_probs, targets, in_lengths, lengths)
-                    loss.backward()
-                    self.optimizer.step()
-                    if not isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
-                        self.scheduler.step()
-
-                    self.test_loss.update(loss)
-
-                    loss = None if self.test_loss is None else '{:.4f}'.format(self.test_loss.compute().item())
-                    lr = None if self.optimizer is None else '{:.2e}'.format(self.optimizer.param_groups[0]['lr'])
-
-                    pbar.set_postfix(loss=loss, lr=lr)
+            self.train_step(train_loader, e, epochs)
 
             log = {
                 'loss': self.test_loss.compute().item(),
@@ -90,45 +128,16 @@ class CTCModel(nn.Module):
             }
 
             if val_loader is not None:
-
-                ser_err = 0
-                ser_total = 0
                 if self.val_loss is not None:
                     self.val_loss.reset()
 
-                self.eval()
-                with tqdm(val_loader, unit='batch', desc=f'epoch {e}/{epochs}') as pbar:
-
-                    for images, targets, lengths in pbar:
-                        images = images.to(self.device)
-                        targets = targets.to(self.device)
-
-                        logits = self(images)
-                        log_probs = F.log_softmax(logits, dim=2)
-                        in_lengths = torch.full((logits.size(1),), logits.size(0), dtype=torch.long)
-                        loss = self.loss(log_probs, targets, in_lengths, lengths)
-
-                        self.val_loss.update(loss)
-
-                        decoded = self.greedy_decode(logits)
-                        for b, d in enumerate(decoded):
-                            target = targets[b]
-                            ser_err += levenshtein_distance(target, d)
-                        ser_total += lengths.sum().item()
-
-                        ser = ser_err / ser_total if ser_total > 0 else None
-                        loss = None if self.val_loss is None else f'{self.val_loss.compute().item():.4f}'
-
-                        pbar.set_postfix(loss=loss, ser=ser)
+                ser_err, ser_total = self.validate_step(val_loader, e, epochs)
 
                 log = {
                     **log,
                     'val_loss': self.val_loss.compute().item() if self.val_loss is not None else None,
                     'ser': ser_err / ser_total if ser_total > 0 else None
                 }
-
-                if torch.cuda.is_available():
-                    torch.cuda.clear_cache()
 
             logs.append(log)
 
@@ -207,7 +216,59 @@ def crnn_ctc_model(classes: int, learning_rate: float, weight_decay: float, img_
         nn.Dropout2d(p=0.2)
     )
     c = 256
-    height = int((img_height - 4) / 16)
+    height = math.ceil(((img_height / 4 - 2) / 2 - 2) / 2)
+    in_dim = c * height
+    model = CTCModel(DEVICE, classes, backbone, in_dim, 512, 2)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=150, eta_min=0)
+    model.configure(
+        optimizer,
+        scheduler,
+        nn.CTCLoss(blank=classes, reduction='mean', zero_infinity=True),
+        { 
+            'loss': MeanMetric('error', dist_sync_on_step=False),
+            'val_loss': MeanMetric('error', dist_sync_on_step=False),
+        }
+    )
+    return torch.compile(model)
+
+def crnn_ctc_small_model(classes: int, learning_rate: float, weight_decay: float, img_height: int):
+    backbone = nn.Sequential(
+        nn.Conv2d(3, 32, 3, padding=1),
+        nn.BatchNorm2d(32),
+        nn.ReLU(),
+        nn.Conv2d(32, 32, 3, padding=1),
+        nn.BatchNorm2d(32),
+        nn.ReLU(),
+        nn.MaxPool2d((2, 2), (2, 2)),
+        nn.Dropout2d(p=0.1),
+
+        nn.Conv2d(32, 64, 3, padding=1),
+        nn.BatchNorm2d(64),
+        nn.ReLU(),
+        nn.Conv2d(64, 64, 3, padding=1),
+        nn.BatchNorm2d(64),
+        nn.ReLU(),
+        nn.MaxPool2d((2, 2), (2, 2)),
+        nn.Dropout2d(p=0.1),
+
+        nn.Conv2d(64, 128, 3, padding=1),
+        nn.BatchNorm2d(128),
+        nn.ReLU(),
+        nn.Conv2d(128, 128, 1),
+        nn.BatchNorm2d(128),
+        nn.ReLU(),
+        nn.MaxPool2d((2, 1), (2, 1)),
+        nn.Dropout2d(p=0.15),
+
+        nn.Conv2d(128, 256, 3, padding=1),
+        nn.BatchNorm2d(256),
+        nn.ReLU(),
+        nn.MaxPool2d((2, 1), (2, 1)),
+        nn.Dropout2d(p=0.2)
+    )
+    c = 256
+    height = math.ceil((img_height / 4 - 2) / 4)
     in_dim = c * height
     model = CTCModel(DEVICE, classes, backbone, in_dim, 512, 2)
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)

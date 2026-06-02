@@ -9,6 +9,7 @@ from datetime import datetime
 import json
 import os
 import sys
+#import traceback
 
 from common import SplitDataset
 from img import collate
@@ -62,17 +63,24 @@ def main(args: argparse.Namespace):
     if len(test_dataset) > 0:
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
 
-    model = models.crnn_ctc_model(num_classes, learning_rate, weight_decay, max_heihgt)
+    model = models.crnn_ctc_small_model(num_classes, learning_rate, weight_decay, max_heihgt)
+    hyperparams = {
+        'batch_size': args.batch_size,
+        'epochs': args.epochs,
+        'learning_rate': learning_rate,
+        'weight_decay': weight_decay
+    }
 
     train_begin = datetime.now()
     #try:
     #    logs = model.fit(args.epochs, train_loader, val_loader if len(val_dataset) > 0 else None)
     #    error = None
+    #    error_trace = None
     #except Exception as e:
     #    logs = None
     #    error = str(e)
+    #    error_trace = traceback.format_exc()
     logs = model.fit(args.epochs, train_loader, val_loader if len(val_dataset) > 0 else None)
-    error = None
     train_end = datetime.now()
 
     result = None
@@ -82,11 +90,14 @@ def main(args: argparse.Namespace):
     env.close()
 
     metadata_record = {
+        'model_name': 'crnn_ctc_small_model',
+        'hyperparams': hyperparams,
         'train_logs': logs,
         'training_time': (train_end - train_begin).total_seconds(),
         'evaluation_result': result,
-        'cuda_mem_summary': torch.cuda.memory_summary() if torch.cuda.is_available() else None,
-        'error': error
+        'cuda_mem_summary': torch.cuda.memory_summary() if torch.cuda.is_available() else None
+        #'error': error,
+        #'stack_trace': error_trace
     }
 
     os.makedirs(args.model, exist_ok=True)
