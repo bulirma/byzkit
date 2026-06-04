@@ -19,7 +19,7 @@ import models
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--dataset', default=None, type=str, help='lmdb split dataset')
 argparser.add_argument('--model', default=None, type=str, help='path to save the model to')
-argparser.add_argument('--seed', default=42, type=int, help='randomization seed')
+argparser.add_argument('--seed', default=None, type=int, help='randomization seed')
 argparser.add_argument('--epochs', default=20, type=int, help='number of epochs')
 argparser.add_argument('--batch_size', default=100, type=int, help='batch size')
 
@@ -35,6 +35,12 @@ def main(args: argparse.Namespace):
         print('model path is required', file=sys.stderr)
         return 1
 
+    seed = args.seed
+    if seed is None:
+        seed = np.random.randint(np.iinfo(np.uint32).max)
+
+    torch.manual_seed(seed)
+
     os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
     learning_rate = 0.001
@@ -43,19 +49,19 @@ def main(args: argparse.Namespace):
     env = lmdb.open(args.dataset, max_dbs=6)
 
     with open(os.path.join(args.dataset, 'metadata.json'), 'r') as f:
-        metadata = json.load(f)
+        dataset_metadata = json.load(f)
 
-    num_classes = len(metadata['label_map'])
-    max_heihgt = metadata['sample_image_max_height']
+    num_classes = len(dataset_metadata['label_code_map'])
+    max_heihgt = dataset_metadata['sample_image_max_height']
 
     transform = transforms.Compose((
         transforms.ToImage(),
         transforms.ToDtype(torch.float32, scale=True)
     ))
 
-    train_dataset = SplitDataset(env, metadata, 'train', transform)
-    val_dataset = SplitDataset(env, metadata, 'val', transform)
-    test_dataset = SplitDataset(env, metadata, 'test', transform)
+    train_dataset = SplitDataset(env, dataset_metadata, 'train', transform)
+    val_dataset = SplitDataset(env, dataset_metadata, 'val', transform)
+    test_dataset = SplitDataset(env, dataset_metadata, 'test', transform)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate)
     if len(val_dataset) > 0:
@@ -71,6 +77,7 @@ def main(args: argparse.Namespace):
         'weight_decay': weight_decay
     }
 
+    print('training...')
     train_begin = datetime.now()
     #try:
     #    logs = model.fit(args.epochs, train_loader, val_loader if len(val_dataset) > 0 else None)
@@ -83,22 +90,30 @@ def main(args: argparse.Namespace):
     logs = model.fit(args.epochs, train_loader, val_loader if len(val_dataset) > 0 else None)
     train_end = datetime.now()
 
+    training_time = (train_end - train_begin).total_seconds()
+    print(f'model trained in {training_time} seconds')
+
     result = None
     if len(test_dataset) > 0 and logs is not None:
+        print('testing...')
         result = model.evaluate(test_loader)
 
     env.close()
 
-    metadata_record = {
+    model_metadata = {
         'model_name': 'crnn_ctc_small_model',
+        'seed': seed,
         'hyperparams': hyperparams,
         'train_logs': logs,
-        'training_time': (train_end - train_begin).total_seconds(),
+        'training_time': training_time,
         'evaluation_result': result,
-        'cuda_mem_summary': torch.cuda.memory_summary() if torch.cuda.is_available() else None
+        'cuda_mem_summary': torch.cuda.memory_summary() if torch.cuda.is_available() else None,
+        'dataset_metadata': dataset_metadata
         #'error': error,
         #'stack_trace': error_trace
     }
+
+    print('saving model...')
 
     os.makedirs(args.model, exist_ok=True)
 
@@ -107,7 +122,9 @@ def main(args: argparse.Namespace):
         np.savez_compressed(os.path.join(args.model, 'state.npz'), **model_state)
 
     with open(os.path.join(args.model, 'metadata.json'), 'w') as f:
-        json.dump(metadata_record, f, indent=4)
+        json.dump(model_metadata, f, indent=4)
+
+    print('done')
 
     return 1 if logs is None else 0
 

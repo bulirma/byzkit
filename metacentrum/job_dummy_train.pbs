@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #PBS -N byz-ctc
-#PBS -l select=1:ncpus=1:mem=16gb:scratch_local=2gb:ngpus=1:gpu_mem=4gb:gpu_cap=compute_70:cuda_version=13.0
+#PBS -l select=1:ncpus=1:mem=16gb:scratch_local=4gb:ngpus=1:gpu_mem=8gb:gpu_cap=compute_70:cuda_version=13.0
 #PBS -l walltime=6:00:00
 #PBS -o stdout_ctc_dummy.txt
 #PBS -e stderr_ctc_dummy.txt
@@ -10,7 +10,7 @@
 
 DATADIR="___currentdir___"
 
-cp -r "$DATADIR/sds32.lmdb" "$SCRATCHDIR"
+cp -r "$DATADIR/sds4c.lmdb" "$SCRATCHDIR"
 cp "$DATADIR/common.py" "$SCRATCHDIR"
 cp "$DATADIR/img.py" "$SCRATCHDIR"
 cp "$DATADIR/models.py" "$SCRATCHDIR"
@@ -19,9 +19,9 @@ cp "$DATADIR/train.py" "$SCRATCHDIR"
 cd "$SCRATCHDIR"
 
 . "$DATADIR/venv/bin/activate"
-python train.py --dataset sds32.lmdb --model m32
+python train.py --dataset sds4c.lmdb --model m4c
 deactivate
 
-cp -r "$SCRATCHDIR/m32" "$DATADIR"
+cp -r "$SCRATCHDIR/m4c" "$DATADIR"
 
 clean_scratch

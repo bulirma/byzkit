@@ -10,5 +10,5 @@ neume.py
 segmentation.py
 train.py
 byztex/template_standalone.tex
-notrack/sds1k.lmdb
-notrack/sds32.lmdb
+notrack/testing/dsp4c.zip
+notrack/testing/sds4c.lmdb

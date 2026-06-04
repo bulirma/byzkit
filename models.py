@@ -52,8 +52,21 @@ class CTCModel(nn.Module):
             decoded.append(result)
         return decoded
 
+    def symbol_error_rate(self, ser_err: int, ser_total: int, logits: torch.Tensor, targets: torch.Tensor, lengths: torch.Tensor):
+        decoded = self.greedy_decode(logits)
+        offset = 0
+        for d, l in zip(decoded, lengths):
+            target = targets[offset: offset + l]
+            offset += l
+            ser_err += levenshtein_distance(target, d)
+        ser_total += lengths.sum().item()
+        return ser_err, ser_total
+
     def train_step(self, train_loader: DataLoader, epoch: int, epochs: int):
         self.train()
+
+        ser_err = 0
+        ser_total = 0
 
         with tqdm(train_loader, unit='batch', desc=f'epoch {epoch}/{epochs}') as pbar:
 
@@ -73,10 +86,17 @@ class CTCModel(nn.Module):
 
                 self.test_loss.update(loss)
 
+                e, t = self.symbol_error_rate(ser_err, ser_total, logits, targets, lengths)
+                ser_err += e
+                ser_total += t
+
                 loss = None if self.test_loss is None else '{:.4f}'.format(self.test_loss.compute().item())
                 lr = None if self.optimizer is None else '{:.2e}'.format(self.optimizer.param_groups[0]['lr'])
+                ser = ser_err / ser_total if ser_total > 0 else None
 
-                pbar.set_postfix(loss=loss, lr=lr)
+                pbar.set_postfix(loss=loss, lr=lr, ser=ser)
+
+        return ser_err, ser_total
 
     def validate_step(self, val_loader: DataLoader, epoch: int, epochs: int):
         self.eval()
@@ -97,13 +117,9 @@ class CTCModel(nn.Module):
 
                 self.val_loss.update(loss)
 
-                decoded = self.greedy_decode(logits)
-                offset = 0
-                for d, l in zip(decoded, lengths):
-                    target = targets[offset: offset + l]
-                    offset += l
-                    ser_err += levenshtein_distance(target, d)
-                ser_total += lengths.sum().item()
+                e, t = self.symbol_error_rate(ser_err, ser_total, logits, targets, lengths)
+                ser_err += e
+                ser_total += t
 
                 ser = ser_err / ser_total if ser_total > 0 else None
                 loss = None if self.val_loss is None else f'{self.val_loss.compute().item():.4f}'
@@ -120,11 +136,12 @@ class CTCModel(nn.Module):
             if self.test_loss is not None:
                 self.test_loss.reset()
 
-            self.train_step(train_loader, e, epochs)
+            ser_err, ser_total = self.train_step(train_loader, e, epochs)
 
             log = {
                 'loss': self.test_loss.compute().item(),
-                'lr': self.optimizer.param_groups[0]['lr']
+                'lr': self.optimizer.param_groups[0]['lr'],
+                'ser': ser_err / ser_total if ser_total > 0 else None
             }
 
             if val_loader is not None:
@@ -136,7 +153,7 @@ class CTCModel(nn.Module):
                 log = {
                     **log,
                     'val_loss': self.val_loss.compute().item() if self.val_loss is not None else None,
-                    'ser': ser_err / ser_total if ser_total > 0 else None
+                    'val_ser': ser_err / ser_total if ser_total > 0 else None
                 }
 
             logs.append(log)
@@ -149,19 +166,34 @@ class CTCModel(nn.Module):
 
         self.test_loss.reset()
 
-        for images, targets, lengths in test_loader:
-            images = images.to(self.device)
-            targets = targets.to(self.device)
+        ser_err = 0
+        ser_total = 0
 
-            logits = self(images)
-            log_probs = F.log_softmax(logits, dim=2)
-            in_lengths = torch.full((logits.size(1),), logits.size(0), dtype=torch.long)
-            loss = self.loss(log_probs, targets, in_lengths, lengths)
-            
-            self.test_loss.update(loss)
+        with tqdm(test_loader, unit='batch', desc='evaluation') as pbar:
+
+            for images, targets, lengths in pbar:
+                images = images.to(self.device)
+                targets = targets.to(self.device)
+
+                logits = self(images)
+                log_probs = F.log_softmax(logits, dim=2)
+                in_lengths = torch.full((logits.size(1),), logits.size(0), dtype=torch.long)
+                loss = self.loss(log_probs, targets, in_lengths, lengths)
+                
+                self.test_loss.update(loss)
+
+                e, t = self.symbol_error_rate(ser_err, ser_total, logits, targets, lengths)
+                ser_err += e
+                ser_total += t
+
+                ser = ser_err / ser_total if ser_total > 0 else None
+                loss = f'{self.test_loss.compute().item():.4f}'
+
+                pbar.set_postfix(loss=loss, ser=ser)
 
         return {
-            'loss': self.test_loss.compute().item()
+            'loss': self.test_loss.compute().item(),
+            'ser': ser_err / ser_total if ser_total > 0 else None
         }
 
     @torch.no_grad()

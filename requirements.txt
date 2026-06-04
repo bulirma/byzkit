@@ -1,4 +1,5 @@
 albumentationsx
+joblib
 lmdb
 matplotlib
 numpy
