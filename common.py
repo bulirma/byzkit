@@ -36,8 +36,7 @@ class SplitDataset(Dataset):
         return F.pad(img, (0, 0, t, b), mode='constant', value=value)
 
     def __len__(self) -> int:
-        #return self.samples
-        return 20
+        return self.samples
 
     def __getitem__(self, idx: int):
         key = self.key(idx)
@@ -139,6 +138,8 @@ def empty_dir(path: str):
 def levenshtein_distance(a: torch.Tensor, b: torch.Tensor):
     sa = a.size(0)
     sb = b.size(0)
+    a = a.tolist()
+    b = b.tolist()
 
     dists = list(range(sb + 1))
     for i in range(1, sa + 1):

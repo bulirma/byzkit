@@ -36,7 +36,8 @@ argparser.add_argument('--output', type=str, default=None, help='output dataset 
 argparser.add_argument('--input', type=str, default=None, help='input dataset path')
 argparser.add_argument('--pages', type=int, default=1_000, help='number of pages to be generated for the page dataset')
 argparser.add_argument('--augment', type=int, default=0, help='page augmentation multiplicator (no augmentation when 0)')
-argparser.add_argument('--split', type=str, default=None, help='split of pickle dataset (fmt: train,test or train,val,test')
+argparser.add_argument('--split', type=str, default=None, help='split of pickle dataset (fmt: train,test or train,val,test)')
+argparser.add_argument('--distribution', type=str, default=None, help='distribution json file for page dataset generation')
 argparser.add_argument('--min_neumes_per_line', type=int, default=MIN_NEUMES_PER_LINE, help='minimum number of neumes per line')
 
 
@@ -56,6 +57,9 @@ def validate_args(args: argparse.Namespace) -> bool:
         return False
     if args.input is not None and not is_existing_dir(args.input):
         print('input dataset directory does not exist', file=sys.stderr)
+        return False
+    if args.distribution is not None and not os.path.exists(args.distribution):
+        print('distribution file does not exist', file=sys.stderr)
         return False
     if args.min_neumes_per_line < MIN_NEUMES_PER_LINE or args.min_neumes_per_line > MAX_NEUMES_PER_LINE:
         print(f'incorrent number of neumes per line, valid interval: [{MIN_NEUMES_PER_LINE}, {MAX_NEUMES_PER_LINE}]', file=sys.stderr)
@@ -99,10 +103,6 @@ def get_split(split_arg_str: str) -> tuple:
     else:
         split = (1, 0, 0)
     return split
-
-def get_neume_map():
-    classes = load_classes()
-    return { c: i for i, c in enumerate(classes) }
 
 def setup_augmentation(seed: int):
     global augment
@@ -178,12 +178,12 @@ def gen_page_image(outdir_path: str, neume_generator: NeumeGenerator, min_neumes
     os.remove(tex_path)
     os.remove(doc_path)
 
-def gen_page_image_dataset(outdir_path: str, pages: int, min_neumes_per_line: int, seed: int):
+def gen_page_image_dataset(outdir_path: str, pages: int, min_neumes_per_line: int, seed: int, distribution: dict):
     if seed is None:
         seed = np.random.randint(np.iinfo(np.uint32).max)
 
     print('generating page dataset...')
-    generator = NeumeGenerator(seed=seed)
+    generator = NeumeGenerator(distribution, seed=seed)
 
     name_width = dec_width(pages)
     with tqdm(range(1, pages + 1)) as pbar:
@@ -196,6 +196,7 @@ def gen_page_image_dataset(outdir_path: str, pages: int, min_neumes_per_line: in
     metadata = {
         'ds_type': 'page',
         'seed': seed,
+        'distribution': distribution,
         'pages': pages
     }
     with open(os.path.join(outdir_path, 'metadata.json'), 'w') as f:
@@ -277,15 +278,23 @@ def create_line_image_dataset(
     page_dataset_path: str,
     outdir_path: str,
     augmentation_multiplier: int,
-    label_map: dict,
     workers: int = 1
 ):
     with open(os.path.join(page_dataset_path, 'metadata.json'), 'r') as f:
         metadata = json.load(f)
 
     seed = metadata['seed']
+    distribution = metadata['distribution']
 
     setup_augmentation(seed)
+
+    classes = load_classes()
+    label_map = dict()
+    label_code_map = dict()
+    for i, c in enumerate(classes):
+        if distribution[c] > 0:
+            label_map[c] = len(label_map)
+            label_code_map[i] = label_map[c]
 
     raw_path_prefix = os.path.join(outdir_path, 'raw')
     augmented_path_prefix = os.path.join(outdir_path, 'augmented')
@@ -321,18 +330,21 @@ def create_line_image_dataset(
     raw_count = sum(map(lambda x: x[1], results))
     augmented_count = raw_count * augmentation_multiplier
 
+    label_code_map_list = list(sorted(label_code_map.keys(), key=lambda k: label_code_map[k]))
+
     metadata = {
         **metadata,
         'ds_type': 'line',
+        'labels': classes,
+        'label_code_map': None if distribution is None else label_code_map_list,
+        'sample_image_max_height': max_height,
+        'augmentation_multiplier': augmentation_multiplier,
         'raw': {
             'samples': raw_count
         },
         'augmented': {
             'samples': augmented_count
-        },
-        'label_map': list(sorted(label_map.keys(), key=lambda k: label_map[k])),
-        'sample_image_max_height': max_height,
-        'augmentation_multiplier': augmentation_multiplier
+        }
     }
 
     with open(os.path.join(outdir_path, 'metadata.json'), 'w') as f:
@@ -397,6 +409,7 @@ def create_split_database(db_dataset_path: str, sdb_dataset_path: str, db_env: l
     raw_targets_db = db_env.open_db(b'raw_targets')
     augmented_data_db = db_env.open_db(b'augmented_data')
     augmented_targets_db = db_env.open_db(b'augmented_targets')
+
     train_data_db = sdb_env.open_db(b'train_data')
     train_targets_db = sdb_env.open_db(b'train_targets')
     val_data_db = sdb_env.open_db(b'val_data')
@@ -414,54 +427,78 @@ def create_split_database(db_dataset_path: str, sdb_dataset_path: str, db_env: l
         'ds_type': 'sdb'
     }
 
-    match_key_width = metadata['raw']['key_width']
-    augmented_count = metadata['augmented']['samples']
-    denom = metadata['raw']['samples'] // sum(split)
-    cumulative_split = []
-    for nom in split:
-        last = 0 if len(cumulative_split) == 0 else cumulative_split[-1]
-        cumulative_split.append(denom * nom + last)
+    count_splits = dict()
+    for prefix in ('raw', 'augmented'):
+        samples = metadata[prefix]['samples']
+        count_split = []
+        prefix_split = split if prefix == 'raw' else split[:-1]
+        denom = samples // sum(prefix_split)
+        for num in prefix_split:
+            count_split.append(denom * num)
+        count_split[0] += samples - sum(count_split)
+        count_splits[prefix] = count_split
 
-    begin = 0
-    for end, db_pair, metadata_name in zip(
-        cumulative_split,
-        [(train_data_db, train_targets_db), (val_data_db, val_targets_db), (test_data_db, test_targets_db)],
-        ['train', 'val', 'test']
-    ):
-        count = end - begin
-        arg_count = count + (augmented_count if metadata_name == 'train' else 0)
-        key_width = dec_width(arg_count) if arg_count > 0 else 0
-        metadata[metadata_name] = {
-            'samples': count,
-            'key_width': key_width
-        }
-        print(f'storing {metadata_name} samples...')
+    count_splits['augmented'].append(0)
 
-        with db_env.begin(write=False) as in_txn, sdb_env.begin(write=True) as out_txn, tqdm(range(count)) as pbar:
-            for i in pbar:
-                match_key = str(begin + i).zfill(match_key_width).encode()
-                key = str(i).zfill(key_width).encode()
-                data_value = in_txn.get(match_key, db=raw_data_db)
-                target_value = in_txn.get(match_key, db=raw_targets_db)
-                out_txn.put(key, data_value, db=db_pair[0])
-                out_txn.put(key, target_value, db=db_pair[1])
-            begin = end
+    all_db_pairs = [(train_data_db, train_targets_db), (val_data_db, val_targets_db), (test_data_db, test_targets_db)]
+    all_db_prefixes = ['train', 'val', 'test']
+    source_db_pairs = {
+        'raw': (raw_data_db, raw_targets_db),
+        'augmented': (augmented_data_db, augmented_targets_db)
+    }
 
-    print('storing augmented samples...')
-    
-    train_samples = metadata['train']['samples']
-    match_key_width = metadata['augmented']['key_width']
-    key_width = metadata['train']['key_width']
-    with db_env.begin(write=False) as in_txn, sdb_env.begin(write=True) as out_txn, tqdm(range(augmented_count)) as pbar:
-        for i in pbar:
-            match_key = str(i).zfill(match_key_width).encode()
-            key = str(train_samples + i).zfill(key_width).encode()
-            data_value = in_txn.get(match_key, db=augmented_data_db)
-            target_value = in_txn.get(match_key, db=augmented_targets_db)
-            out_txn.put(key, data_value, db=train_data_db)
-            out_txn.put(key, target_value, db=train_targets_db)
+    db_pairs = {
+        'raw': all_db_pairs,
+        'augmented': all_db_pairs[:-1]
+    }
+    db_prefixes = {
+        'raw': all_db_prefixes,
+        'augmented': all_db_prefixes[:-1]
+    }
 
-    metadata['train']['samples'] += augmented_count
+    for db_prefix in all_db_prefixes:
+        metadata[db_prefix] = dict()
+
+    for prefix in ('raw', 'augmented'):
+        for i, db_prefix in enumerate(all_db_prefixes):
+            metadata[db_prefix][prefix + '_samples'] = count_splits[prefix][i]
+
+    for db_prefix in all_db_prefixes:
+        samples = metadata[db_prefix]['raw_samples'] + metadata[db_prefix]['augmented_samples']
+        metadata[db_prefix]['samples'] = samples
+        metadata[db_prefix]['key_width'] = dec_width(samples) if samples > 0 else 0
+
+    offsets = dict()
+    for prefix in ('raw', 'augmented'):
+        offsets[prefix] = dict()
+        for db_prefix in all_db_prefixes:
+            offsets[prefix][db_prefix] = 0 if prefix == 'raw' else metadata[db_prefix]['raw_samples']
+
+    for prefix in ('raw', 'augmented'):
+        print(f'storing {prefix} samples...')
+        
+        source_data_db, source_targets_db = source_db_pairs[prefix]
+        source_key_width = metadata[prefix]['key_width']
+        source_offset = 0
+
+        for db_prefix, db_pair in zip(db_prefixes[prefix], db_pairs[prefix]):
+            count = metadata[db_prefix][prefix + '_samples']
+            key_width = metadata[db_prefix]['key_width']
+            offset = offsets[prefix][db_prefix]
+
+            print(f'storing {db_prefix} samples...')
+
+            with db_env.begin(write=False) as in_txn, sdb_env.begin(write=True) as out_txn, tqdm(range(count)) as pbar:
+                for i in pbar:
+                    match_key = str(source_offset + i).zfill(source_key_width).encode()
+                    key = str(offset + i).zfill(key_width).encode()
+                    data_value = in_txn.get(match_key, db=source_data_db)
+                    target_value = in_txn.get(match_key, db=source_targets_db)
+                    out_txn.put(key, data_value, db=db_pair[0])
+                    out_txn.put(key, target_value, db=db_pair[1])
+
+            source_offset += count
+
     metadata['raw'].pop('key_width')
     metadata['augmented'].pop('key_width')
 
@@ -491,7 +528,12 @@ def main(args):
             empty_dir(output_name)
         else:
             os.makedirs(output_name, exist_ok=True)
-        gen_page_image_dataset(output_name, args.pages, args.min_neumes_per_line, args.seed)
+        if args.distribution is not None:
+            with open(args.distribution, 'r') as f:
+                distribution = json.load(f)
+        else:
+            distribution = None
+        gen_page_image_dataset(output_name, args.pages, args.min_neumes_per_line, args.seed, distribution)
         dataset_path = output_name
     if o == 1:
         return 0
@@ -501,7 +543,7 @@ def main(args):
             empty_dir(output_name)
         else:
             os.makedirs(output_name, exist_ok=True)
-        create_line_image_dataset(dataset_path, output_name, args.augment, get_neume_map(), args.workers)
+        create_line_image_dataset(dataset_path, output_name, args.augment, args.workers)
         dataset_path = output_name
     if o == 2:
         return 0

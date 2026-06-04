@@ -1,9 +1,9 @@
 import cv2
 import lmdb
 import numpy as np
-import pygame
 import torch
-from ultralytics import YOLO
+from torch.nn import functional as F
+import torchvision.transforms.v2 as transforms
 
 import argparse
 import io
@@ -11,8 +11,10 @@ import json
 import os
 import sys
 
-from common import is_existing_dir, plt_show_column_grid, plt_show
+from common import is_existing_dir, plt_show_column_grid
 from img import symmetric_pad
+from models import CTCModel, crnn_ctc_small_model
+from train import DEVICE
 
 
 NEUME_IMG_DIR_PATH = os.path.join('byztex', 'named_neume_images')
@@ -27,124 +29,14 @@ argparser.add_argument('--model', type=str, default=None, help='model path')
 argparser.add_argument('--image', type=str, default=None, help='model path')
 
 
-class Canvas:
-    _point_stroke = {
-        (0, 0): torch.tensor((0, 0, 0), dtype=torch.uint8)
-    }
-    _red_point_stroke = {
-        (0, 0): torch.tensor((255, 0, 0), dtype=torch.uint8)
-    }
-    _small_stroke = {
-        (-1, -1): torch.tensor((63, 63, 63), dtype=torch.uint8),
-        (-1, 1): torch.tensor((63, 63, 63), dtype=torch.uint8),
-        (1, -1): torch.tensor((63, 63, 63), dtype=torch.uint8),
-        (1, 1): torch.tensor((63, 63, 63), dtype=torch.uint8),
-        (-1, 0): torch.tensor((31, 31, 31), dtype=torch.uint8),
-        (0, -1): torch.tensor((31, 31, 31), dtype=torch.uint8),
-        (0, 1): torch.tensor((31, 31, 31), dtype=torch.uint8),
-        (1, 0): torch.tensor((31, 31, 31), dtype=torch.uint8),
-        (0, 0): torch.tensor((0, 0, 0), dtype=torch.uint8) 
-    }
-    _small_red_stroke = {
-        (-1, -1): torch.tensor((239, 0, 0), dtype=torch.uint8),
-        (-1, 1): torch.tensor((239, 0, 0), dtype=torch.uint8),
-        (1, -1): torch.tensor((239, 0, 0), dtype=torch.uint8),
-        (1, 1): torch.tensor((239, 0, 0), dtype=torch.uint8),
-        (-1, 0): torch.tensor((247, 0, 0), dtype=torch.uint8),
-        (0, -1): torch.tensor((247, 0, 0), dtype=torch.uint8),
-        (0, 1): torch.tensor((247, 0, 0), dtype=torch.uint8),
-        (1, 0): torch.tensor((247, 0, 0), dtype=torch.uint8),
-        (0, 0): torch.tensor((255, 0, 0), dtype=torch.uint8) 
-    }
-    _erase_stroke = {
-        (-1, -1): torch.tensor((255, 255, 255), dtype=torch.uint8),
-        (-1, 1): torch.tensor((255, 255, 255), dtype=torch.uint8),
-        (1, -1): torch.tensor((255, 255, 255), dtype=torch.uint8),
-        (1, 1): torch.tensor((255, 255, 255), dtype=torch.uint8),
-        (-1, 0): torch.tensor((255, 255, 255), dtype=torch.uint8),
-        (0, -1): torch.tensor((255, 255, 255), dtype=torch.uint8),
-        (0, 1): torch.tensor((255, 255, 255), dtype=torch.uint8),
-        (1, 0): torch.tensor((255, 255, 255), dtype=torch.uint8),
-        (0, 0): torch.tensor((255, 255, 255), dtype=torch.uint8) 
-    }
-
-    def __init__(self, screen, x, y, c, scw, sch):
-        self.screen = screen
-        self.x = x + 1
-        self.y = y + 1
-        self.scw = scw
-        self.sch = sch
-        self.sw = self.scw * c
-        self.sh = self.sch * c
-        self.c = c
-        self._stroke = self._small_stroke
-        self._eraser = False
-        self.clear()
-
-    def render(self):
-        pygame.draw.rect(self.screen, (0, 0, 0), (self.x, self.y, self.sw, self.sh), 1)
-        for xi in range(self.scw):
-            sx = xi * self.c + self.x
-            for yi in range(self.sch):
-                if (self.image[xi, yi] == torch.tensor((255, 255, 255), dtype=torch.uint8)).all():
-                    continue
-                sy = yi * self.c + self.y
-                c = self.image[xi, yi].tolist()
-                pygame.draw.rect(self.screen, c, (sx, sy, self.c, self.c), 0)
-
-    def _is_at(self, x, y):
-        return 0 <= x < self.sw and 0 <= y < self.sh
-
-    def is_at(self, ax, ay):
-        x, y = ax - self.x, ay - self.y
-        return self._is_at(x, y)
-
-    def _apply_stroke(self, xi, yi):
-        for (oxi, oyi), c in self._stroke.items():
-            rxi, ryi = oxi + xi, oyi + yi
-            if rxi < 0 or ryi < 0 or rxi >= self.scw or ryi >= self.sch:
-                continue
-            if self._eraser:
-                self.image[rxi, ryi] |= c
-            else:
-                self.image[rxi, ryi] &= c
-
-    def draw(self, ax, ay):
-        x, y = ax - self.x, ay - self.y
-        xi = x // self.c
-        yi = y // self.c
-        self._apply_stroke(xi, yi)
-
-    def clear(self):
-        self.image = torch.ones((self.scw, self.sch, 3), dtype=torch.uint8) * 255
-
-    def set_point_stroke(self):
-        self._eraser = False
-        self._stroke = self._point_stroke
-
-    def set_small_stroke(self):
-        self._eraser = False
-        self._stroke = self._small_stroke
-
-    def set_red_point_stroke(self):
-        self._eraser = False
-        self._stroke = self._red_point_stroke
-
-    def set_small_red_stroke(self):
-        self._eraser = False
-        self._stroke = self._small_red_stroke
-
-    def set_erase_stroke(self):
-        self._eraser = True
-        self._stroke = self._erase_stroke
-
-
-def show_sample(txn: lmdb.Transaction, data_db: lmdb._Database, targets_db: lmdb._Database, key: bytes):
+def show_sample(txn: lmdb.Transaction, data_db: lmdb._Database, targets_db: lmdb._Database, label_code_map: dict, key: bytes):
     value = txn.get(key, db=data_db)
     target = txn.get(key, db=targets_db)
     img = cv2.imdecode(np.frombuffer(value, np.uint8), cv2.IMREAD_UNCHANGED)
     target_buf = io.BytesIO(target)
     label = np.load(target_buf, allow_pickle=False)['target']
+    if label_code_map is not None:
+        label = [label_code_map[i] for i in label]
     label_neume_imgs = [NEUME_IMGS[i] for i in label]
     label_img = np.concatenate(label_neume_imgs, axis=1)
     label_img = cv2.cvtColor(label_img, cv2.COLOR_BGR2RGB)
@@ -158,15 +50,17 @@ def demo_db_dataset(dataset_path: str, metadata: dict):
     augmented_data_db = env.open_db(b'augmented_data')
     augmented_targets_db = env.open_db(b'augmented_targets')
 
+    label_code_map = metadata['label_code_map']
+
     with env.begin(write=False) as txn:
 
         def show_raw(key: bytes):
-            nonlocal txn, raw_data_db, raw_targets_db
-            show_sample(txn, raw_data_db, raw_targets_db, key)
+            nonlocal txn, raw_data_db, raw_targets_db, label_code_map
+            show_sample(txn, raw_data_db, raw_targets_db, label_code_map, key)
 
         def show_augmented(key: bytes):
-            nonlocal txn, augmented_data_db, augmented_targets_db
-            show_sample(txn, augmented_data_db, augmented_targets_db, key)
+            nonlocal txn, augmented_data_db, augmented_targets_db, label_code_map
+            show_sample(txn, augmented_data_db, augmented_targets_db, label_code_map, key)
 
         show = show_raw
         db_name = 'raw'
@@ -194,61 +88,44 @@ def demo_db_dataset(dataset_path: str, metadata: dict):
 
     env.close()
 
-def demo_model(model_path: str):
-    GRID_W = 140
-    GRID_H = 28
-    GRID_C = 8
-    GRID_LM = 8
-    GRID_TM = GRID_LM
-    CANVAS_W = GRID_C * GRID_W + 2 * GRID_LM
-    CANVAS_H = GRID_C * GRID_H + 2 * GRID_TM
+def load_model(model_path: str):
+    with open(os.path.join(model_path, 'metadata.json'), 'r') as f:
+        metadata = json.load(f)
+    hyperparams = metadata['hyperparams']
 
-    pygame.init()
-    screen = pygame.display.set_mode((CANVAS_W, CANVAS_H))
-    pygame.display.set_caption('MNIST demo')
-    clock = pygame.time.Clock()
+    with open(os.path.join(model_path, 'state.npz'), 'rb') as f:
+        npz = np.load(f, allow_pickle=False)
+        state_dict = { k: torch.from_numpy(npz[k]).to(DEVICE) for k in npz.keys() }
 
-    canvas = Canvas(screen, GRID_LM, GRID_TM, GRID_C, GRID_W, GRID_H)
+    model = crnn_ctc_small_model(84, hyperparams['learning_rate'], hyperparams['weight_decay'], metadata['image_height'])
+    model.load_state_dict(state_dict)
 
-    running = True
-    while running:
-        screen.fill('white')
-        clock.tick(60)
+    return model, metadata
 
-        canvas.render()
+def load_image(image_path: str, height: int):
+    transform = transforms.Compose((
+        transforms.ToImage(),
+        transforms.ToDtype(torch.float32, scale=True)
+    ))
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                key = pygame.key.name(event.key)
-                if key == 'c':
-                    canvas.clear()
-                elif key == '1':
-                    canvas.set_point_stroke()
-                elif key == '2':
-                    canvas.set_small_stroke()
-                elif key == '3':
-                    canvas.set_red_point_stroke()
-                elif key == '4':
-                    canvas.set_small_red_stroke()
-                elif key == '0':
-                    canvas.set_erase_stroke()
-
-        left_pressed = pygame.mouse.get_pressed()[0]
-        pos = pygame.mouse.get_pos()
-        if left_pressed and canvas.is_at(*pos):
-            canvas.draw(*pos)
-
-        pygame.display.flip()
-
-    pygame.quit()
+    img = cv2.imread(image_path)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = torch.from_numpy(img).permute(2, 0, 1)
+    img = transform(img)
+    h = height - img.size(1)
+    t = h // 2
+    b = h - t
+    img = F.pad(img, (0, 0, t, b), mode='constant', value=1.0)
+    return img
 
 def demo_image(model_path: str, image_path: str):
-    img = cv2.imread(image_path)
-    model = YOLO('yolo26n.pt')
-    results = model(img)
-    print(results)
+    model, metadata = load_model(model_path)
+    img = load_image(image_path, metadata['image_height'])
+    img = img.unsqueeze(0)
+    prediction = model.predict(img)
+    decoded = model.greedy_decode(prediction)
+    result = decoded[0]
+    print(result)
     
 
 def main(args):
@@ -277,12 +154,6 @@ def main(args):
             print('incorrect model path', file=sys.stderr)
             return 1
         demo_image(args.model, args.image)
-
-    elif args.model is not None:
-        if not is_existing_dir(args.model):
-            print('incorrect model path', file=sys.stderr)
-            return 1
-        demo_model(args.model)
 
     return 0
     

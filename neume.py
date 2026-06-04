@@ -17,11 +17,10 @@ class NeumeGenerator:
     num_classes = len(classes)
 
     def __init__(self, distribution: dict = None, seed: int = None):
-        if distribution is None:
-            distribution = dict()
+        distribution = dict() if distribution is None else distribution.copy()
         self.denom = distribution.get('denominator', NeumeGenerator.num_classes)
         self.dist = dict()
-        num_missing = NeumeGenerator.num_classes - len(distribution) + (1 if 'denominator' in distribution else 0)
+        num_missing = self.denom - len(distribution) + (1 if 'denominator' in distribution else 0)
         for key in NeumeGenerator.classes:
             if key not in distribution:
                 distribution[key] = num_missing / self.denom
