@@ -12,11 +12,12 @@ import os
 import sys
 from typing import Iterable
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from common import is_existing_dir, plt_show_column_grid
-from draw import run_draw
-from img import symmetric_pad
-from models import CTCModel, SmallCNN, crnn_ctc_model
-from train import DEVICE
+from demo.draw import run_draw
+from demo.img import symmetric_pad
+from train import SmallCNN, crnn_ctc_model, DEVICE
 
 
 NEUME_IMG_DIR_PATH = os.path.join('byztex', 'named_neume_images')

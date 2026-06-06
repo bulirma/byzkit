@@ -12,3 +12,4 @@ train.py
 byztex/template_standalone.tex
 notrack/testing/dsp4c.zip
 notrack/testing/sds4c.lmdb
+notrack/public/dsp1200.zip

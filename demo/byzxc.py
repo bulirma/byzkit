@@ -7,9 +7,11 @@ import json
 import lmdb
 import os
 import sys
+from typing import List
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from common import is_existing_dir
-from typing import List
 
 
 BAR_NEUMES = (

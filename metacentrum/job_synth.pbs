@@ -1,16 +1,16 @@
 #!/bin/bash
 
 #PBS -N byz-ds
-#PBS -l select=1:ncpus=16:mem=24gb:scratch_local=8gb
-#PBS -l walltime=02:00:00
-#PBS -o stdout_ds_4c.txt
-#PBS -e stderr_ds_4c.txt
+#PBS -l select=1:ncpus=64:mem=144gb:scratch_local=12gb
+#PBS -l walltime=12:00:00
+#PBS -o stdout_ds_1200.txt
+#PBS -e stderr_ds_1200.txt
 #PBS -m ae
 #PBS -V
 
 DATADIR="___currentdir___"
 
-unzip -d "$SCRATCHDIR" "$DATADIR/dsp4c.zip"
+unzip -d "$SCRATCHDIR" "$DATADIR/dsp1200.zip"
 mkdir "$SCRATCHDIR/byztex"
 cp "$DATADIR/template_standalone.tex" "$SCRATCHDIR/byztex"
 cp "$DATADIR/common.py" "$SCRATCHDIR"
@@ -21,9 +21,9 @@ cp "$DATADIR/segmentation.py" "$SCRATCHDIR"
 cd "$SCRATCHDIR"
 
 . "$DATADIR/venv/bin/activate"
-python dataset.py --type line --input dsp4c --output dsl4c --augment 12 --workers 16
+python dataset.py --type line --input dsp1200 --output dsl1200 --augment 16 --workers 64
 deactivate
 
-zip -r "$DATADIR/dsl4c.zip" "$SCRATCHDIR/dsl4c"
+zip -r "$DATADIR/dsl1200.zip" "$SCRATCHDIR/dsl1200"
 
 clean_scratch

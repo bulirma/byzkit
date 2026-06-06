@@ -5,10 +5,16 @@ from torch.utils.data import DataLoader
 from torchmetrics import MeanMetric
 from tqdm import tqdm
 
-from common import levenshtein_distance
+from logging import Logger
 import math
-from train import DEVICE
+import os
+import sys
 from typing import Callable
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from common import levenshtein_distance
+from train.consts import DEVICE
 
 
 class CTCModel(nn.Module):
@@ -37,6 +43,9 @@ class CTCModel(nn.Module):
         self.loss = loss
         self.test_loss = metrics.get('loss').to(self.device)
         self.val_loss = metrics.get('val_loss').to(self.device)
+
+    def set_logger(self, logger: Logger):
+        self.logger = logger
 
     def greedy_decode(self, logits: torch.Tensor):
         preds = torch.argmax(logits, dim=2)
@@ -140,9 +149,9 @@ class CTCModel(nn.Module):
             ser_err, ser_total = self.train_step(train_loader, e, epochs)
 
             log = {
-                'loss': self.test_loss.compute().item(),
-                'lr': self.optimizer.param_groups[0]['lr'],
-                'ser': ser_err / ser_total if ser_total > 0 else None
+                'Training loss': self.test_loss.compute().item(),
+                'Learning rate': self.optimizer.param_groups[0]['lr'],
+                'Training symbol error rate': ser_err / ser_total if ser_total > 0 else None
             }
 
             if val_loader is not None:
@@ -153,13 +162,13 @@ class CTCModel(nn.Module):
 
                 log = {
                     **log,
-                    'val_loss': self.val_loss.compute().item() if self.val_loss is not None else None,
-                    'val_ser': ser_err / ser_total if ser_total > 0 else None
+                    'Validation loss': self.val_loss.compute().item() if self.val_loss is not None else None,
+                    'Validation symbol error rate': ser_err / ser_total if ser_total > 0 else None
                 }
 
             logs.append(log)
 
-            if val_loader is not None and log['val_ser'] < 1e-12:
+            if val_loader is not None and log['Validation symbol error rate'] < 1e-12:
                 return logs
 
         return logs

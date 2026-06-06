@@ -12,9 +12,11 @@ import random
 import sys
 #import traceback
 
-from common import SplitDataset
-from img import collate
-import models
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from train.dataset import SplitDataset
+from train.img import collate
+import train.models as models
 
 
 argparser = argparse.ArgumentParser()
@@ -23,9 +25,6 @@ argparser.add_argument('--model', default=None, type=str, help='path to save the
 argparser.add_argument('--seed', default=None, type=int, help='randomization seed')
 argparser.add_argument('--epochs', default=20, type=int, help='number of epochs')
 argparser.add_argument('--batch_size', default=100, type=int, help='batch size')
-
-
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def main(args: argparse.Namespace):

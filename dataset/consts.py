@@ -1,0 +1,9 @@
+LINES_PER_PAGE = 12
+MIN_NEUMES_PER_LINE = 7
+MAX_NEUMES_PER_LINE = 15
+LABELS_FILENAME = 'labels.txt'
+TEX_FILENAME = 'page.tex'
+DOCUMENT_FILENAME = 'page.pdf'
+IMAGE_FILENAME = 'page.png'
+DS_TYPES = ['page', 'line', 'db', 'sdb']
+DS_RESERVED_NAMES = ['ds_page', 'ds_line', 'ds.lmdb']

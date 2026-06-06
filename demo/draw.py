@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
-from img import bresenham_filled_circle, bresenham_line
+from demo.img import bresenham_filled_circle, bresenham_line
 
 
 class PixelCanvas:

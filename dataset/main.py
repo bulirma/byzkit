@@ -13,20 +13,23 @@ import shutil
 import subprocess
 import sys
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from common import dec_width, is_existing_dir, empty_dir
-from neume import NeumeGenerator, load_classes
-from segmentation import get_line_images_with_neume_count, get_line_bboxes, get_color_bbox
+from dataset.consts import (
+    LINES_PER_PAGE,
+    MIN_NEUMES_PER_LINE,
+    MAX_NEUMES_PER_LINE,
+    LABELS_FILENAME,
+    TEX_FILENAME,
+    DOCUMENT_FILENAME,
+    IMAGE_FILENAME,
+    DS_TYPES,
+    DS_RESERVED_NAMES
+)
+from dataset.neume import NeumeGenerator, load_classes
+from dataset.segmentation import get_line_images_with_neume_count, get_line_bboxes, get_color_bbox
 
-
-LINES_PER_PAGE = 12
-MIN_NEUMES_PER_LINE = 7
-MAX_NEUMES_PER_LINE = 15
-LABELS_FILENAME = 'labels.txt'
-TEX_FILENAME = 'page.tex'
-DOCUMENT_FILENAME = 'page.pdf'
-IMAGE_FILENAME = 'page.png'
-DS_TYPES = ['page', 'line', 'db', 'sdb']
-DS_RESERVED_NAMES = ['ds_page', 'ds_line', 'ds.lmdb']
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--workers', type=int, default=1, help='number of CPUs')
@@ -533,7 +536,6 @@ def main(args):
 
     if i == 0:
         output_name = args.output if o == 1 else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[0])
-        output_name = os.path.join(os.path.dirname(__file__), output_name)
         if is_existing_dir(output_name):
             empty_dir(output_name)
         else:
