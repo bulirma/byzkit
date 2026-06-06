@@ -107,7 +107,8 @@ def convert_dataset(dataset_path: str, output_path: str, byzx_map: dict):
     raw_targets_db = env.open_db(b'raw_targets')
     key_width = dataset_metadata['raw']['key_width']
     samples = dataset_metadata['raw']['samples']
-    label_map = dataset_metadata['label_map']
+    label_code_map = dataset_metadata['label_code_map']
+    labels = dataset_metadata['labels']
 
     converter = ByzxConverter(byzx_map)
 
@@ -118,7 +119,8 @@ def convert_dataset(dataset_path: str, output_path: str, byzx_map: dict):
                 value = txn.get(key, db=raw_targets_db)
                 buf = io.BytesIO(value)
                 target = np.load(buf, allow_pickle=False)['target']
-                label = [label_map[l] for l in target]
+                codes = target.tolist() if label_code_map is None else [label_code_map[c] for c in target]
+                label = [labels[c] for c in codes]
                 converter.convert_neume_line(label)
 
     env.close()

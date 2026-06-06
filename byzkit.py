@@ -4,8 +4,8 @@ from dataset.main import main as dataset_main
 from dataset.main import argparser as dataset_argparser
 from demo.main import main as demo_main
 from demo.main import argparser as demo_argparser
-from demo.byzxc import main as byzxc_main
-from demo.byzxc import argparser as byzxc_argparser
+from byzxc.main import main as byzxc_main
+from byzxc.main import argparser as byzxc_argparser
 from train.main import main as train_main
 from train.main import argparser as train_argparser
 
