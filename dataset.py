@@ -292,12 +292,16 @@ def create_line_image_dataset(
     setup_augmentation(seed)
 
     classes = load_classes()
-    label_map = dict()
-    label_code_map = dict()
-    for i, c in enumerate(classes):
-        if distribution[c] > 0:
-            label_map[c] = len(label_map)
-            label_code_map[i] = label_map[c]
+    if distribution is None:
+        label_map = { c: i for i, c in enumerate(classes) }
+        label_code_map = None
+    else:
+        label_map = dict()
+        label_code_map = dict()
+        for i, c in enumerate(classes):
+            if distribution[c] > 0:
+                label_map[c] = len(label_map)
+                label_code_map[i] = label_map[c]
 
     raw_path_prefix = os.path.join(outdir_path, 'raw')
     augmented_path_prefix = os.path.join(outdir_path, 'augmented')
@@ -333,13 +337,16 @@ def create_line_image_dataset(
     raw_count = sum(map(lambda x: x[1], results))
     augmented_count = raw_count * augmentation_multiplier
 
-    label_code_map_list = list(sorted(label_code_map.keys(), key=lambda k: label_code_map[k]))
+    if label_code_map is None:
+        label_code_map_list = None
+    else:
+        label_code_map_list = list(sorted(label_code_map.keys(), key=lambda k: label_code_map[k]))
 
     metadata = {
         **metadata,
         'ds_type': 'line',
         'labels': classes,
-        'label_code_map': None if distribution is None else label_code_map_list,
+        'label_code_map': label_code_map_list,
         'sample_image_max_height': max_height,
         'augmentation_multiplier': augmentation_multiplier,
         'raw': {

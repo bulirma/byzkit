@@ -100,6 +100,61 @@ def demo_db_dataset(dataset_path: str, metadata: dict):
 
     env.close()
 
+def demo_sdb_dataset(dataset_path: str, metadata: dict):
+    env = lmdb.open(dataset_path, max_dbs=6)
+    train_data_db = env.open_db(b'train_data')
+    train_targets_db = env.open_db(b'train_targets')
+    val_data_db = env.open_db(b'val_data')
+    val_targets_db = env.open_db(b'val_targets')
+    test_data_db = env.open_db(b'test_data')
+    test_targets_db = env.open_db(b'test_targets')
+
+    label_code_map = metadata['label_code_map']
+
+    with env.begin(write=False) as txn:
+
+        def show_train(key: bytes):
+            nonlocal txn, train_data_db, train_targets_db, label_code_map
+            show_db_sample(txn, train_data_db, train_targets_db, label_code_map, key)
+
+        def show_val(key: bytes):
+            nonlocal txn, val_data_db, val_targets_db, label_code_map
+            show_db_sample(txn, val_data_db, val_targets_db, label_code_map, key)
+
+        def show_test(key: bytes):
+            nonlocal txn, test_data_db, test_targets_db, label_code_map
+            show_db_sample(txn, test_data_db, test_targets_db, label_code_map, key)
+
+        show = show_train
+        db_name = 'train'
+        print(f'viewing {metadata[db_name]["samples"]} train samples')
+
+        while True:
+            cmd = input('> ')
+            if 'quit'.startswith(cmd):
+                break
+            if 'train'.startswith(cmd):
+                show = show_train
+                db_name = 'train'
+                print(f'viewing {metadata[db_name]["samples"]} train samples')
+            elif 'validation'.startswith(cmd):
+                show = show_val
+                db_name = 'val'
+                print(f'viewing {metadata[db_name]["samples"]} validation samples')
+            elif 'test'.startswith(cmd):
+                show = show_test
+                db_name = 'test'
+                print(f'viewing {metadata[db_name]["samples"]} test samples')
+            elif cmd.isnumeric():
+                idx = int(cmd)
+                if idx >= metadata[db_name]['samples']:
+                    print('invalid index', file=sys.stderr)
+                    continue
+                key = str(idx).zfill(metadata[db_name]['key_width']).encode()
+                show(key)
+
+    env.close()
+
 def load_model(model_path: str):
     with open(os.path.join(model_path, 'metadata.json'), 'r') as f:
         metadata = json.load(f)
@@ -192,9 +247,8 @@ def main(args):
             metadata = json.load(f)
         if metadata['ds_type'] == 'db':
             demo_db_dataset(args.dataset, metadata)
-        #elif metadata['ds_type'] == 'sdb':
-        #    # TODO
-        #    pass
+        elif metadata['ds_type'] == 'sdb':
+            demo_sdb_dataset(args.dataset, metadata)
         else:
             print('unsupported dataset type', file=sys.stderr)
             return 1
