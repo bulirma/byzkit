@@ -137,6 +137,8 @@ def typeset_document(document_path: str):
     os.remove(document_path.replace('.tex', '.log'))
 
 def augment_page(page_img: cv2.Mat, mult: int):
+    global augment
+
     augmentations = []
     for _ in range(mult):
         bboxes = get_line_bboxes(page_img)
@@ -152,6 +154,7 @@ def augment_page(page_img: cv2.Mat, mult: int):
             line_img = transformed_img[t: b, l: r]
             line_imgs.append(line_img)
         augmentations.append(line_imgs)
+
     return augmentations
 
 def gen_page_image(outdir_path: str, neume_generator: NeumeGenerator, min_neumes_per_line: int):

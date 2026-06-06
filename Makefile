@@ -13,7 +13,7 @@ dl_m:
 	rsync -urv metacentrum:byzkit/m1k ./notrack/public/
 
 dl_dm:
-	rsync -urv metacentrum:byzkit/m32 ./notrack/testing/
+	rsync -urv metacentrum:byzkit/m4c ./notrack/testing/
 
 dl_t:
 	rsync -urv metacentrum:byzkit/stderr.txt ./notrack/public/

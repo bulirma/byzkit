@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #PBS -N byz-ctc
-#PBS -l select=1:ncpus=1:mem=16gb:scratch_local=4gb:ngpus=1:gpu_mem=8gb:gpu_cap=compute_70:cuda_version=13.0
+#PBS -l select=1:ncpus=1:mem=8gb:scratch_local=1gb:ngpus=1:gpu_mem=4gb:gpu_cap=compute_70:cuda_version=13.0
 #PBS -l walltime=6:00:00
 #PBS -o stdout_ctc_dummy.txt
 #PBS -e stderr_ctc_dummy.txt
