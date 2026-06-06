@@ -8,6 +8,7 @@ import argparse
 from datetime import datetime
 import json
 import os
+import random
 import sys
 #import traceback
 
@@ -40,6 +41,8 @@ def main(args: argparse.Namespace):
         seed = np.random.randint(np.iinfo(np.uint32).max)
 
     torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
 
     os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
@@ -51,7 +54,10 @@ def main(args: argparse.Namespace):
     with open(os.path.join(args.dataset, 'metadata.json'), 'r') as f:
         dataset_metadata = json.load(f)
 
-    num_classes = len(dataset_metadata['label_code_map'])
+    if dataset_metadata['label_code_map'] is None:
+        num_classes = len(dataset_metadata['labels'])
+    else:
+        num_classes = len(dataset_metadata['label_code_map'])
     max_heihgt = dataset_metadata['sample_image_max_height']
 
     transform = transforms.Compose((
@@ -69,7 +75,7 @@ def main(args: argparse.Namespace):
     if len(test_dataset) > 0:
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
 
-    model = models.crnn_ctc_small_model(num_classes, learning_rate, weight_decay, max_heihgt)
+    model = models.crnn_ctc_model(models.SmallCNN, num_classes, args.epochs, learning_rate, weight_decay, max_heihgt)
     hyperparams = {
         'batch_size': args.batch_size,
         'epochs': args.epochs,

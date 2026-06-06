@@ -8,15 +8,15 @@ from tqdm import tqdm
 from common import levenshtein_distance
 import math
 from train import DEVICE
+from typing import Callable
 
 
 class CTCModel(nn.Module):
-    def __init__(self, device, num_classes, backbone, rnn_in_dim, rnn_hidden, rnn_layers):
+    def __init__(self, device, num_classes, backbone, rnn, linear):
         super().__init__()
         self.backbone = backbone
-        self.rnn = nn.LSTM(input_size=rnn_in_dim, hidden_size=rnn_hidden, num_layers=rnn_layers, batch_first=False, bidirectional=True)
-        self.fc = nn.Linear(rnn_hidden * 2, num_classes + 1)
-        self.backbone.to(device)
+        self.rnn = rnn
+        self.fc = linear
         self.to(device)
         self.device = device
         self.num_classes = num_classes
@@ -98,6 +98,7 @@ class CTCModel(nn.Module):
 
         return ser_err, ser_total
 
+    @torch.no_grad()
     def validate_step(self, val_loader: DataLoader, epoch: int, epochs: int):
         self.eval()
 
@@ -158,6 +159,9 @@ class CTCModel(nn.Module):
 
             logs.append(log)
 
+            if val_loader is not None and log['val_ser'] < 1e-12:
+                return logs
+
         return logs
 
     @torch.no_grad()
@@ -203,8 +207,11 @@ class CTCModel(nn.Module):
         return self(image)
 
 
-def crnn_ctc_model(classes: int, learning_rate: float, weight_decay: float, img_height: int):
-    backbone = nn.Sequential(
+def BigCNN():
+    def height_collapser(height: int) -> int:
+        return math.ceil(((height / 4 - 2) / 2 - 2) / 2)
+
+    return nn.Sequential(
         nn.Conv2d(3, 32, 3, padding=1),
         nn.BatchNorm2d(32),
         nn.ReLU(),
@@ -246,26 +253,13 @@ def crnn_ctc_model(classes: int, learning_rate: float, weight_decay: float, img_
         nn.ReLU(),
         nn.MaxPool2d((2, 1), (2, 1)),
         nn.Dropout2d(p=0.2)
-    )
-    c = 256
-    height = math.ceil(((img_height / 4 - 2) / 2 - 2) / 2)
-    in_dim = c * height
-    model = CTCModel(DEVICE, classes, backbone, in_dim, 512, 2)
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=150, eta_min=0)
-    model.configure(
-        optimizer,
-        scheduler,
-        nn.CTCLoss(blank=classes, reduction='mean', zero_infinity=True),
-        { 
-            'loss': MeanMetric('error', dist_sync_on_step=False),
-            'val_loss': MeanMetric('error', dist_sync_on_step=False),
-        }
-    )
-    return torch.compile(model)
+    ), 256, height_collapser
 
-def crnn_ctc_small_model(classes: int, learning_rate: float, weight_decay: float, img_height: int):
-    backbone = nn.Sequential(
+def SmallCNN():
+    def height_collapser(height: int) -> int:
+        return math.ceil((height / 4 - 2) / 4)
+        
+    return nn.Sequential(
         nn.Conv2d(3, 32, 3, padding=1),
         nn.BatchNorm2d(32),
         nn.ReLU(),
@@ -298,17 +292,24 @@ def crnn_ctc_small_model(classes: int, learning_rate: float, weight_decay: float
         nn.ReLU(),
         nn.MaxPool2d((2, 1), (2, 1)),
         nn.Dropout2d(p=0.2)
-    )
-    c = 256
-    height = math.ceil((img_height / 4 - 2) / 4)
+    ), 256, height_collapser
+
+
+def crnn_ctc_model(cnn_constructor: Callable, num_classes: int, epochs: int, learning_rate: float, weight_decay: float, img_height: int):
+    backbone, c, height_collapser = cnn_constructor()
+    height = height_collapser(img_height)
     in_dim = c * height
-    model = CTCModel(DEVICE, classes, backbone, in_dim, 512, 2)
+    rnn_hidden = 512
+    rnn_layers = 2
+    rnn = nn.LSTM(input_size=in_dim, hidden_size=rnn_hidden, num_layers=rnn_layers, batch_first=False, bidirectional=True)
+    linear = nn.Linear(rnn_hidden * 2, num_classes + 1)
+    model = CTCModel(DEVICE, num_classes, backbone, rnn, linear)
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=150, eta_min=0)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
     model.configure(
         optimizer,
         scheduler,
-        nn.CTCLoss(blank=classes, reduction='mean', zero_infinity=True),
+        nn.CTCLoss(blank=num_classes, reduction='mean', zero_infinity=True),
         { 
             'loss': MeanMetric('error', dist_sync_on_step=False),
             'val_loss': MeanMetric('error', dist_sync_on_step=False),
