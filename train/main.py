@@ -5,7 +5,6 @@ from torch.utils.data import DataLoader
 import torchvision.transforms.v2 as transforms
 
 import argparse
-from datetime import datetime
 import json
 import logging
 import os
