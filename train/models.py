@@ -6,9 +6,9 @@ from torchmetrics import MeanMetric
 from tqdm import tqdm
 
 from logging import Logger
-import math
 import os
 import sys
+import traceback
 from typing import Callable
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -26,6 +26,8 @@ class CTCModel(nn.Module):
         self.to(device)
         self.device = device
         self.num_classes = num_classes
+
+        self.logger = None
 
     def forward(self, x):
         b, c, h, w = x.size()
@@ -70,6 +72,10 @@ class CTCModel(nn.Module):
             ser_err += levenshtein_distance(target, d)
         ser_total += lengths.sum().item()
         return ser_err, ser_total
+
+    def get_log_detail(self, data: dict) -> str:
+        details = [f'> {desc}: {val}' for desc, val in data.items()]
+        return os.linesep.join(details)
 
     def train_step(self, train_loader: DataLoader, epoch: int, epochs: int):
         self.train()
@@ -139,39 +145,48 @@ class CTCModel(nn.Module):
         return ser_err, ser_total
 
     def fit(self, epochs: int, train_loader: DataLoader, val_loader: DataLoader = None):
-        logs = []
+        try:
 
-        for e in range(1, epochs + 1):
+            for e in range(1, epochs + 1):
 
-            if self.test_loss is not None:
-                self.test_loss.reset()
+                if self.test_loss is not None:
+                    self.test_loss.reset()
 
-            ser_err, ser_total = self.train_step(train_loader, e, epochs)
-
-            log = {
-                'Training loss': self.test_loss.compute().item(),
-                'Learning rate': self.optimizer.param_groups[0]['lr'],
-                'Training symbol error rate': ser_err / ser_total if ser_total > 0 else None
-            }
-
-            if val_loader is not None:
-                if self.val_loss is not None:
-                    self.val_loss.reset()
-
-                ser_err, ser_total = self.validate_step(val_loader, e, epochs)
+                ser_err, ser_total = self.train_step(train_loader, e, epochs)
 
                 log = {
-                    **log,
-                    'Validation loss': self.val_loss.compute().item() if self.val_loss is not None else None,
-                    'Validation symbol error rate': ser_err / ser_total if ser_total > 0 else None
+                    'Training loss': self.test_loss.compute().item(),
+                    'Learning rate': self.optimizer.param_groups[0]['lr'],
+                    'Training symbol error rate': ser_err / ser_total if ser_total > 0 else None
                 }
 
-            logs.append(log)
+                if val_loader is not None:
+                    if self.val_loss is not None:
+                        self.val_loss.reset()
 
-            if val_loader is not None and log['Validation symbol error rate'] < 1e-12:
-                return logs
+                    ser_err, ser_total = self.validate_step(val_loader, e, epochs)
 
-        return logs
+                    log = {
+                        **log,
+                        'Validation loss': self.val_loss.compute().item() if self.val_loss is not None else None,
+                        'Validation symbol error rate': ser_err / ser_total if ser_total > 0 else None
+                    }
+
+                if self.logger is not None:
+                    detail = self.get_log_detail(log)
+                    self.logger.info(f'epoch {e} results:{os.linesep}{detail}')
+
+                if val_loader is not None and log['Validation symbol error rate'] < 1e-12:
+                    return True
+
+        except:
+            if self.logger is not None:
+                trace = traceback.format_exc()
+                self.logger.error(f'caught an error:{os.linesep}{trace}')
+
+            return False
+
+        return True
 
     @torch.no_grad()
     def evaluate(self, test_loader):
@@ -204,10 +219,13 @@ class CTCModel(nn.Module):
 
                 pbar.set_postfix(loss=loss, ser=ser)
 
-        return {
-            'loss': self.test_loss.compute().item(),
-            'ser': ser_err / ser_total if ser_total > 0 else None
+        result = {
+            'Test loss': self.test_loss.compute().item(),
+            'Test symbol error rate': ser_err / ser_total if ser_total > 0 else None
         }
+        if self.logger is not None:
+            detail = self.get_log_detail(result)
+            self.logger.info(f'test results:{os.linesep}{detail}')
 
     @torch.no_grad()
     def predict(self, image):
@@ -216,9 +234,9 @@ class CTCModel(nn.Module):
         return self(image)
 
 
-def BigCNN():
+def BigCNN() -> tuple:
     def height_collapser(height: int) -> int:
-        return math.ceil(((height / 4 - 2) / 2 - 2) / 2)
+        return int(((height / 4 - 2) / 2 - 2) / 2)
 
     return nn.Sequential(
         nn.Conv2d(3, 32, 3, padding=1),
@@ -264,9 +282,9 @@ def BigCNN():
         nn.Dropout2d(p=0.2)
     ), 256, height_collapser
 
-def SmallCNN():
+def SmallCNN() -> tuple:
     def height_collapser(height: int) -> int:
-        return math.ceil((height / 4 - 2) / 4)
+        return int((height / 4 - 1) / 4)
         
     return nn.Sequential(
         nn.Conv2d(3, 32, 3, padding=1),
@@ -304,7 +322,14 @@ def SmallCNN():
     ), 256, height_collapser
 
 
-def crnn_ctc_model(cnn_constructor: Callable, num_classes: int, epochs: int, learning_rate: float, weight_decay: float, img_height: int):
+def crnn_ctc_model(
+    cnn_constructor: Callable,
+    num_classes: int,
+    epochs: int,
+    learning_rate: float,
+    weight_decay: float,
+    img_height: int
+) -> CTCModel:
     backbone, c, height_collapser = cnn_constructor()
     height = height_collapser(img_height)
     in_dim = c * height

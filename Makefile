@@ -7,7 +7,7 @@ dl_dds:
 	rsync -urv metacentrum:byzkit/dsl4c.zip ./notrack/testing/
 
 dl_ds:
-	rsync -urv metacentrum:byzkit/dsl1k.zip ./notrack/public/
+	rsync -urv metacentrum:byzkit/dsl1200.zip ./notrack/public/
 
 dl_m:
 	rsync -urv metacentrum:byzkit/m1k ./notrack/public/
