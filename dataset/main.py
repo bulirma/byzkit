@@ -16,6 +16,11 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from common import dec_width, is_existing_dir, empty_dir
+from common.segmentation import (
+    get_line_images_with_neume_count,
+    get_line_bboxes,
+    get_color_bbox
+)
 from dataset.consts import (
     LINES_PER_PAGE,
     MIN_NEUMES_PER_LINE,
@@ -27,21 +32,42 @@ from dataset.consts import (
     DS_TYPES,
     DS_RESERVED_NAMES
 )
-from dataset.neume import NeumeGenerator, load_classes
-from dataset.segmentation import get_line_images_with_neume_count, get_line_bboxes, get_color_bbox
+from dataset.neume import NeumeGenerator, load_classes, FONTS
 
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--workers', type=int, default=1, help='number of CPUs')
 argparser.add_argument('--seed', type=int, default=None, help='seed (no seed by default)')
-argparser.add_argument('--type', type=str, default='db', help=f'dataset format to generate: {"|".join(DS_TYPES)} (default: db)')
+argparser.add_argument(
+    '--type', type=str, default='db',
+    help=f'dataset format to generate: {"|".join(DS_TYPES)} (default: db)'
+)
 argparser.add_argument('--output', type=str, default=None, help='output dataset path')
 argparser.add_argument('--input', type=str, default=None, help='input dataset path')
-argparser.add_argument('--pages', type=int, default=1_000, help='number of pages to be generated for the page dataset')
-argparser.add_argument('--augment', type=int, default=0, help='page augmentation multiplicator (no augmentation when 0)')
-argparser.add_argument('--split', type=str, default=None, help='split of pickle dataset (fmt: train,test or train,val,test)')
-argparser.add_argument('--distribution', type=str, default=None, help='distribution json file for page dataset generation')
-argparser.add_argument('--min_neumes_per_line', type=int, default=MIN_NEUMES_PER_LINE, help='minimum number of neumes per line')
+argparser.add_argument(
+    '--pages', type=int, default=1_000,
+    help='number of pages to be generated for the page dataset'
+)
+argparser.add_argument(
+    '--augment', type=int, default=0,
+    help='page augmentation multiplicator (no augmentation when 0)'
+)
+argparser.add_argument(
+    '--split', type=str, default=None,
+    help='split of pickle dataset (fmt: train,test or train,val,test)'
+)
+argparser.add_argument(
+    '--distribution', type=str, default=None,
+    help='distribution json file for page dataset generation'
+)
+argparser.add_argument(
+    '--font_distribution', type=str, default=None,
+    help='font distribution json file'
+)
+argparser.add_argument(
+    '--min_neumes_per_line', type=int, default=MIN_NEUMES_PER_LINE,
+    help='minimum number of neumes per line'
+)
 
 
 def validate_args(args: argparse.Namespace) -> bool:
@@ -64,8 +90,16 @@ def validate_args(args: argparse.Namespace) -> bool:
     if args.distribution is not None and not os.path.exists(args.distribution):
         print('distribution file does not exist', file=sys.stderr)
         return False
-    if args.min_neumes_per_line < MIN_NEUMES_PER_LINE or args.min_neumes_per_line > MAX_NEUMES_PER_LINE:
-        print(f'incorrent number of neumes per line, valid interval: [{MIN_NEUMES_PER_LINE}, {MAX_NEUMES_PER_LINE}]', file=sys.stderr)
+    if args.font_distribution is not None and not os.path.exists(args.distribution):
+        print('font distribution file does not exist', file=sys.stderr)
+        return False
+    if args.min_neumes_per_line < MIN_NEUMES_PER_LINE or \
+            args.min_neumes_per_line > MAX_NEUMES_PER_LINE:
+        print(
+            'incorrent number of neumes per line, valid interval' +
+            ': [{MIN_NEUMES_PER_LINE}, {MAX_NEUMES_PER_LINE}]',
+            file=sys.stderr
+        )
         return False
     if args.split is not None:
         split_args = args.split.split(',')
@@ -170,8 +204,8 @@ def gen_page_image(outdir_path: str, neume_generator: NeumeGenerator, min_neumes
     with open(tex_path, 'a') as tex_file, open(labels_path, 'w') as label_file:
         for l in range(LINES_PER_PAGE):
             for _ in range(np.random.randint(min_neumes_per_line, MAX_NEUMES_PER_LINE + 1)):
-                neume = neume_generator.next()
-                tex_file.write(f'\\{neume} \\allowbreak{os.linesep}')
+                font, neume = neume_generator.next()
+                tex_file.write(f'\\{font + neume} \\allowbreak{os.linesep}')
                 label_file.write(f'{neume}{os.linesep}')
             tex_file.write(f'\\newline{os.linesep}')
         tex_file.write(os.linesep)
@@ -184,12 +218,19 @@ def gen_page_image(outdir_path: str, neume_generator: NeumeGenerator, min_neumes
     os.remove(tex_path)
     os.remove(doc_path)
 
-def gen_page_image_dataset(outdir_path: str, pages: int, min_neumes_per_line: int, seed: int, distribution: dict):
+def gen_page_image_dataset(
+    outdir_path: str,
+    pages: int,
+    min_neumes_per_line: int,
+    seed: int,
+    distribution: dict,
+    font_distribution: dict
+):
     if seed is None:
         seed = np.random.randint(np.iinfo(np.uint32).max)
 
     print('generating page dataset...')
-    generator = NeumeGenerator(distribution, seed=seed)
+    generator = NeumeGenerator(distribution, font_distribution, seed=seed)
 
     name_width = dec_width(pages)
     with tqdm(range(1, pages + 1)) as pbar:
@@ -199,9 +240,18 @@ def gen_page_image_dataset(outdir_path: str, pages: int, min_neumes_per_line: in
             os.mkdir(page_path)
             gen_page_image(page_path, generator, min_neumes_per_line)
 
+    if font_distribution is None:
+        fonts = FONTS
+    else:
+        if 'denominator' in font_distribution:
+            font_distribution.pop('denominator')
+        fonts = list(font_distribution.keys())
+
     metadata = {
         'ds_type': 'page',
         'seed': seed,
+        'fonts': fonts,
+        'font_distribution': font_distribution,
         'distribution': distribution,
         'pages': pages
     }
@@ -218,7 +268,8 @@ def create_line_image(
     image_path = os.path.join(indir_path, IMAGE_FILENAME)
     labels_path = os.path.join(indir_path, LABELS_FILENAME)
 
-    augmentation_width = dec_width(augmentation_multiplier) if augmentation_multiplier > 0 else 0
+    augmentation_width = dec_width(augmentation_multiplier) if augmentation_multiplier > 0 \
+        else 0
 
     with open(labels_path, 'r') as lf:
         labels = lf.readlines()
@@ -318,14 +369,26 @@ def create_line_image_dataset(
     page_name_width = dec_width(pages)
 
     def create_input(page_num: int) -> tuple:
-        nonlocal page_dataset_path, raw_path_prefix, augmented_path_prefix, page_name_width, augmentation_multiplier, label_map
+        nonlocal \
+            page_dataset_path, \
+            raw_path_prefix, \
+            augmented_path_prefix, \
+            page_name_width, \
+            augmentation_multiplier, \
+            label_map
         page_name = str(page_num).zfill(page_name_width)
         indir_path = os.path.join(page_dataset_path, page_name)
         outdir_raw_path = os.path.join(raw_path_prefix, page_name)
         outdir_augmented_path = os.path.join(augmented_path_prefix, page_name)
         os.makedirs(outdir_raw_path, exist_ok=True)
         os.makedirs(outdir_augmented_path, exist_ok=True)
-        return (indir_path, outdir_raw_path, outdir_augmented_path, augmentation_multiplier, label_map)
+        return (
+            indir_path,
+            outdir_raw_path,
+            outdir_augmented_path,
+            augmentation_multiplier,
+            label_map
+        )
 
     print('image segmentation and augmentation...')
     results = list(tqdm(
@@ -343,7 +406,9 @@ def create_line_image_dataset(
     if label_code_map is None:
         label_code_map_list = None
     else:
-        label_code_map_list = list(sorted(label_code_map.keys(), key=lambda k: label_code_map[k]))
+        label_code_map_list = list(
+            sorted(label_code_map.keys(), key=lambda k: label_code_map[k])
+        )
 
     metadata = {
         **metadata,
@@ -417,7 +482,13 @@ def create_database(line_dataset_path: str, outdir_path:str, lmdb_env: lmdb.Envi
     with open(os.path.join(outdir_path, 'metadata.json'), 'w') as f:
         json.dump(metadata, f, indent=4)
 
-def create_split_database(db_dataset_path: str, sdb_dataset_path: str, db_env: lmdb.Environment, sdb_env: lmdb.Environment, split: tuple):
+def create_split_database(
+    db_dataset_path: str,
+    sdb_dataset_path: str,
+    db_env: lmdb.Environment,
+    sdb_env: lmdb.Environment,
+    split: tuple
+):
     raw_data_db = db_env.open_db(b'raw_data')
     raw_targets_db = db_env.open_db(b'raw_targets')
     augmented_data_db = db_env.open_db(b'augmented_data')
@@ -453,7 +524,11 @@ def create_split_database(db_dataset_path: str, sdb_dataset_path: str, db_env: l
 
     count_splits['augmented'].append(0)
 
-    all_db_pairs = [(train_data_db, train_targets_db), (val_data_db, val_targets_db), (test_data_db, test_targets_db)]
+    all_db_pairs = [
+        (train_data_db, train_targets_db),
+        (val_data_db, val_targets_db),
+        (test_data_db, test_targets_db)
+    ]
     all_db_prefixes = ['train', 'val', 'test']
     source_db_pairs = {
         'raw': (raw_data_db, raw_targets_db),
@@ -485,7 +560,8 @@ def create_split_database(db_dataset_path: str, sdb_dataset_path: str, db_env: l
     for prefix in ('raw', 'augmented'):
         offsets[prefix] = dict()
         for db_prefix in all_db_prefixes:
-            offsets[prefix][db_prefix] = 0 if prefix == 'raw' else metadata[db_prefix]['raw_samples']
+            offsets[prefix][db_prefix] = 0 if prefix == 'raw' \
+                else metadata[db_prefix]['raw_samples']
 
     for prefix in ('raw', 'augmented'):
         print(f'storing {prefix} samples...')
@@ -501,7 +577,8 @@ def create_split_database(db_dataset_path: str, sdb_dataset_path: str, db_env: l
 
             print(f'storing {db_prefix} samples...')
 
-            with db_env.begin(write=False) as in_txn, sdb_env.begin(write=True) as out_txn, tqdm(range(count)) as pbar:
+            with db_env.begin(write=False) as in_txn, \
+                    sdb_env.begin(write=True) as out_txn, tqdm(range(count)) as pbar:
                 for i in pbar:
                     match_key = str(source_offset + i).zfill(source_key_width).encode()
                     key = str(offset + i).zfill(key_width).encode()
@@ -535,22 +612,36 @@ def main(args):
         return 1
 
     if i == 0:
-        output_name = args.output if o == 1 else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[0])
+        output_name = args.output \
+            if o == 1 else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[0])
         if is_existing_dir(output_name):
             empty_dir(output_name)
         else:
             os.makedirs(output_name, exist_ok=True)
-        if args.distribution is not None:
+        if args.distribution is None:
+            distribution = None
+        else:
             with open(args.distribution, 'r') as f:
                 distribution = json.load(f)
+        if args.font_distribution is None:
+            font_distribution = None
         else:
-            distribution = None
-        gen_page_image_dataset(output_name, args.pages, args.min_neumes_per_line, args.seed, distribution)
+            with open(args.font_distribution, 'r') as f:
+                font_distribution = json.load(f)
+        gen_page_image_dataset(
+            output_name,
+            args.pages,
+            args.min_neumes_per_line,
+            args.seed,
+            distribution,
+            font_distribution
+        )
         dataset_path = output_name
     if o == 1:
         return 0
     if i < 2:
-        output_name = args.output if o == 2 else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[1])
+        output_name = args.output if o == 2 \
+            else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[1])
         if is_existing_dir(output_name):
             empty_dir(output_name)
         else:
@@ -560,7 +651,8 @@ def main(args):
     if o == 2:
         return 0
     if i < 3:
-        output_name = args.output if o == 3 else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[2])
+        output_name = args.output if o == 3 \
+            else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[2])
         if is_existing_dir(output_name):
             shutil.rmtree(output_name)
         db_env = lmdb.open(output_name, map_size=db_size, max_dbs=4)

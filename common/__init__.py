@@ -9,6 +9,42 @@ from typing import Union, List
 import shutil
 
 
+class Distrubution:
+    def __init__(self, denominator: int, distribution: dict = None):
+        self.denom = denominator
+        self.dist = dict()
+        if distribution is not None:
+            self.extend(distribution)
+
+    def remainder(self):
+        total = sum(self.dist.values())
+        return self.denom - total
+
+    def add(self, value: str, numerator: int):
+        if numerator > self.remainder():
+            raise ValueError('the distribution sum is greater than 1')
+        self.dist[value] = numerator
+
+    def extend(self, distribution: dict):
+        for value, numerator in distribution.items():
+            self.add(value, numerator)
+
+    def make_uniform(self, values: list):
+        remainder = self.remainder()
+        for key in values:
+            if key in self.dist:
+                raise ValueError('the distribution already contains the value')
+            self.dist[key] = remainder / self.denom
+
+    def make_cumulative(self) -> dict:
+        dist = dict()
+        cum_val = 0
+        for key in self.dist:
+            cum_val += self.dist[key]
+            dist[key] = cum_val
+        return dist
+
+
 def plt_show(img: Union[cv2.Mat, np.ndarray, torch.Tensor], title: str = None):
     plt.imshow(img)
     if title is not None:
