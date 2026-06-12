@@ -15,6 +15,7 @@ from typing import Iterable
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from common import is_existing_dir, plt_show_column_grid
+from dataset.segmentation import get_line_images
 from demo.draw import run_draw
 from demo.img import symmetric_pad
 from train import SmallCNN, crnn_ctc_model, DEVICE
@@ -29,7 +30,8 @@ NEUME_IMGS = [symmetric_pad(img, 0, NEUME_IMGS_MAX_HEIGHT, 255) for img in NEUME
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--dataset', type=str, default=None, help='dataset path')
 argparser.add_argument('--model', type=str, default=None, help='model path')
-argparser.add_argument('--image', type=str, default=None, help='model path')
+argparser.add_argument('--image', type=str, default=None, help='image path')
+argparser.add_argument('--image_source', type=str, default='ByzKit', help='ByzKit|Neanes')
 
 
 def get_label(label: Iterable, label_code_map: list = None):
@@ -177,13 +179,12 @@ def load_model(model_path: str):
 
     return model, metadata
 
-def load_image(image_path: str, height: int):
+def convert_image(img: cv2.Mat, height: int):
     transform = transforms.Compose((
         transforms.ToImage(),
         transforms.ToDtype(torch.float32, scale=True)
     ))
 
-    img = cv2.imread(image_path)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = torch.from_numpy(img).permute(2, 0, 1)
     img = transform(img)
@@ -193,17 +194,22 @@ def load_image(image_path: str, height: int):
     img = F.pad(img, (0, 0, t, b), mode='constant', value=1.0)
     return img
 
-def demo_image(model_path: str, image_path: str):
+def demo_image(model_path: str, image_path: str, image_source: str):
     model, metadata = load_model(model_path)
     dataset_metadata = metadata['dataset_metadata']
-    img = load_image(image_path, dataset_metadata['sample_image_max_height'])
-    img = img.unsqueeze(0)
-    prediction = model.predict(img)
-    decoded = model.greedy_decode(prediction)
-    result = decoded[0]
-    input_img = cv2.imread(image_path)
-    predicted_label = get_label(result.tolist(), dataset_metadata['label_code_map'])
-    show_sample(input_img, predicted_label)
+    img = cv2.imread(image_path)
+    if image_source == 'ByzKit':
+        line_imgs = get_line_images(img)
+    else:
+        line_imgs = get_line_images(img, closing_line_height=18, dilatation_line_height=8)
+    for line_img in line_imgs:
+        limg = convert_image(line_img, dataset_metadata['sample_image_max_height'])
+        limg = limg.unsqueeze(0)
+        prediction = model.predict(limg)
+        decoded = model.greedy_decode(prediction)
+        result = decoded[0]
+        predicted_label = get_label(result.tolist(), dataset_metadata['label_code_map'])
+        show_sample(line_img, predicted_label)
 
 def demo_model(model_path: str):
     transform = transforms.Compose((
@@ -260,7 +266,10 @@ def main(args):
         if args.model is None or not is_existing_dir(args.model):
             print('incorrect model path', file=sys.stderr)
             return 1
-        demo_image(args.model, args.image)
+        if args.image_source not in ('ByzKit', 'Neanes'):
+            print('incorrect image source', file=sys.stderr)
+            return 1
+        demo_image(args.model, args.image, args.image_source)
     elif args.model is not None:
         demo_model(args.model)
 

@@ -59,13 +59,18 @@ def neume_x_bounds(img: cv2.Mat) -> list:
 
     return bounds
 
-def get_line_bboxes(img: cv2.Mat) -> list:
+def get_line_bboxes(img: cv2.Mat, **kwargs) -> list:
+    closing_line_height = kwargs.get('closing_line_height', 32)
+    dilatation_line_height = kwargs.get('dilatation_line_height', 12)
+
+    H, W = img.shape[:2]
+
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     
-    closing_kernel = np.ones((32, 184), np.uint8)
+    closing_kernel = np.ones((closing_line_height, 184), np.uint8)
     closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, closing_kernel)
-    dilatation_kernel = np.ones((12, 16), np.uint8)
+    dilatation_kernel = np.ones((dilatation_line_height, 16), np.uint8)
     dilated = cv2.dilate(closed, dilatation_kernel, iterations=1)
     closed = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, closing_kernel)
     contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -82,16 +87,16 @@ def get_line_bboxes(img: cv2.Mat) -> list:
     line_bboxes = []
     for i, (contour, _) in enumerate(line_contours):
         x, y, w, h = cv2.boundingRect(contour)
-        l = x - 2
-        r = x + w + 2
-        t = y - 2
-        b = y + h + 2
+        l = x - 2 if x > 1 else x
+        r = x + w + 2 if x + w < W - 2 else x + w
+        t = y - 2 if y > 1 else y
+        b = y + h + 2 if y + h < H - 2 else y + h
         line_bboxes.append((t, b, l, r))
 
     return line_bboxes
 
-def get_line_images(img: cv2.Mat):
-    bboxes = get_line_bboxes(img)
+def get_line_images(img: cv2.Mat, **kwargs):
+    bboxes = get_line_bboxes(img, **kwargs)
     line_imgs = []
     for t, b, l, r in bboxes:
         line_img = img[t: b, l: r]
