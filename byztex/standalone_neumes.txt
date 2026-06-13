@@ -76,6 +76,12 @@ oligonElafronKentimata
 oligonRunningElafronKentimata
 oligonElafronApostrofosKentimata
 oligonChamiliKentimata
+stavros
+breath
+leimmaOne
+leimmaTwo
+leimmaThree
+leimmaFour
 barlineSingle
 barlineDouble
 barlineTheseos

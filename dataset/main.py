@@ -155,13 +155,13 @@ def setup_augmentation(seed: int):
 
 def init_document(document_path: str):
     template_lines = []
-    with open('byztex/template_standalone.tex', 'r') as f:
+    with open(os.path.join('byztex', 'byz.tex'), 'r') as f:
         for line in f.readlines():
-            template_lines.append(line)
+            template_lines.append(line.rstrip())
             if line.startswith('\\lsstyle'):
                 break
-    template_lines.append(os.linesep)
-    template_text = ''.join(template_lines)
+    template_lines.append('')
+    template_text = os.linesep.join(template_lines)
     with open(document_path, 'w') as f:
         f.write(template_text)
 
@@ -595,6 +595,88 @@ def create_split_database(
     with open(os.path.join(sdb_dataset_path, 'metadata.json'), 'w') as f:
         json.dump(metadata, f, indent=4)
 
+def run_gen_page_dataset(
+    output_path: str,
+    output_type: int,
+    pages: int,
+    min_neumes_per_line: int,
+    seed: int,
+    distribution_path: str,
+    font_distribution_path: str
+) -> str:
+    output_name = output_path if output_type == 1 \
+        else os.path.join(os.path.dirname(output_path), DS_RESERVED_NAMES[0])
+    if is_existing_dir(output_name):
+        empty_dir(output_name)
+    else:
+        os.makedirs(output_name, exist_ok=True)
+    if distribution_path is None:
+        distribution = None
+    else:
+        with open(distribution_path, 'r') as f:
+            distribution = json.load(f)
+    if font_distribution_path is None:
+        font_distribution = None
+    else:
+        with open(font_distribution_path, 'r') as f:
+            font_distribution = json.load(f)
+    gen_page_image_dataset(
+        output_name,
+        pages,
+        min_neumes_per_line,
+        seed,
+        distribution,
+        font_distribution
+    )
+    return output_name
+
+def run_gen_line_dataset(
+    input_path: str,
+    output_path: str,
+    output_type: int,
+    augment: int,
+    workers: int
+) -> str:
+    output_name = output_path if output_type == 2 \
+        else os.path.join(os.path.dirname(output_path), DS_RESERVED_NAMES[1])
+    if is_existing_dir(output_name):
+        empty_dir(output_name)
+    else:
+        os.makedirs(output_name, exist_ok=True)
+    create_line_image_dataset(input_path, output_name, augment, workers)
+    return output_name
+
+def run_gen_db_dataset(
+    input_path: str,
+    output_path: str,
+    output_type: int,
+    db_size: int
+) -> (str, lmdb.Environment):
+    output_name = output_path if output_type == 3 \
+        else os.path.join(os.path.dirname(output_path), DS_RESERVED_NAMES[2])
+    if is_existing_dir(output_name):
+        shutil.rmtree(output_name)
+    db_env = lmdb.open(output_name, map_size=db_size, max_dbs=4)
+    create_database(input_path, output_name, db_env)
+    return output_name, db_env
+
+def run_gen_sdb_dataset(
+    input_path: str,
+    output_path: str,
+    input_db_env: lmdb.Environment,
+    db_size,
+    split: tuple
+) -> (lmdb.Environment, lmdb.Environment):
+    if is_existing_dir(output_path):
+        shutil.rmtree(output_path)
+    sdb_env = lmdb.open(output_path, map_size=db_size, max_dbs=6)
+
+    split = get_split(split)
+
+    create_split_database(input_path, output_path, input_db_env, sdb_env, split)
+
+    return input_db_env, sdb_env
+
 
 def main(args):
     are_valid = validate_args(args)
@@ -605,74 +687,56 @@ def main(args):
 
     dataset_path = args.input
 
-    i, o = get_dataset_control_order(dataset_path, args.type)
+    input_type, output_type = get_dataset_control_order(dataset_path, args.type)
 
-    is_valid = validate_control_order(i, o, os.path.basename(args.output))
+    is_valid = validate_control_order(input_type, output_type, os.path.basename(args.output))
     if not is_valid:
         return 1
 
-    if i == 0:
-        output_name = args.output \
-            if o == 1 else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[0])
-        if is_existing_dir(output_name):
-            empty_dir(output_name)
-        else:
-            os.makedirs(output_name, exist_ok=True)
-        if args.distribution is None:
-            distribution = None
-        else:
-            with open(args.distribution, 'r') as f:
-                distribution = json.load(f)
-        if args.font_distribution is None:
-            font_distribution = None
-        else:
-            with open(args.font_distribution, 'r') as f:
-                font_distribution = json.load(f)
-        gen_page_image_dataset(
-            output_name,
+    if input_type == 0:
+        dataset_path = run_gen_page_dataset(
+            args.output,
+            output_type,
             args.pages,
             args.min_neumes_per_line,
             args.seed,
-            distribution,
-            font_distribution
+            args.distribution,
+            args.font_distribution
         )
-        dataset_path = output_name
-    if o == 1:
+    if output_type == 1:
         return 0
-    if i < 2:
-        output_name = args.output if o == 2 \
-            else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[1])
-        if is_existing_dir(output_name):
-            empty_dir(output_name)
-        else:
-            os.makedirs(output_name, exist_ok=True)
-        create_line_image_dataset(dataset_path, output_name, args.augment, args.workers)
-        dataset_path = output_name
-    if o == 2:
+    if input_type < 2:
+        dataset_path = run_gen_line_dataset(
+            dataset_path,
+            args.output,
+            output_type,
+            args.augment,
+            args.workers
+        )
+    if output_type == 2:
         return 0
-    if i < 3:
-        output_name = args.output if o == 3 \
-            else os.path.join(os.path.dirname(args.output), DS_RESERVED_NAMES[2])
-        if is_existing_dir(output_name):
-            shutil.rmtree(output_name)
-        db_env = lmdb.open(output_name, map_size=db_size, max_dbs=4)
-        create_database(dataset_path, output_name, db_env)
-        dataset_path = output_name
+    if input_type < 3:
+        dataset_path, db_env = run_gen_db_dataset(
+            dataset_path,
+            args.output,
+            output_type,
+            db_size
+        )
     else:
         db_env = lmdb.open(dataset_path, map_size=db_size, max_dbs=4)
-    if o == 3:
+    if output_type == 3:
         db_env.close()
         return 0
 
-    output_name = args.output
-    if is_existing_dir(output_name):
-        shutil.rmtree(output_name)
-    sdb_env = lmdb.open(output_name, map_size=db_size, max_dbs=6)
+    db_env, sdb_env = run_gen_sdb_dataset(
+        dataset_path,
+        args.output,
+        db_env,
+        db_size,
+        args.split
+    )
 
-    split = get_split(args.split)
-
-    create_split_database(dataset_path, output_name, db_env, sdb_env, split)
-
+    db_env.close()
     sdb_env.close()
 
     return 0

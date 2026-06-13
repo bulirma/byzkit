@@ -104,6 +104,8 @@ def plt_show_column_grid(imgs: List[Union[cv2.Mat, np.ndarray, torch.Tensor]], t
     plt_show_mult(imgs, titles, rows, cols, a, padding)
 
 def dec_width(n: int):
+    if n == 0:
+        return 1
     w = math.ceil(math.log10(n))
     if 10 ** w == n:
         return w + 1
