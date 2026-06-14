@@ -66,7 +66,7 @@ def get_neume_x_bounds(img: cv2.Mat) -> list:
         color_prev = get_contour_color(current_neume[-1], img)
         color = get_contour_color(c, img)
         x_prev, _, w_prev, _ = cv2.boundingRect(current_neume[-1])
-        x, _, w, _ = cv2.boundingRect(c)
+        x, _, _, _ = cv2.boundingRect(c)
         rx_prev = x_prev + w_prev
         bbox_dist = x - rx_prev
         dist = get_contour_distance(current_neume[-1], c)
@@ -101,9 +101,9 @@ def get_neume_x_bounds(img: cv2.Mat) -> list:
     return bounds
 
 def get_line_bboxes(img: cv2.Mat, **kwargs) -> list:
-    closing_line_height = kwargs.get('closing_line_height', 64)
+    closing_line_height = kwargs.get('closing_line_height', 48)
     closing_line_width = kwargs.get('closing_line_width', 240)
-    dilatation_line_height = kwargs.get('dilatation_line_height', 32)
+    dilatation_line_height = kwargs.get('dilatation_line_height', 26)
     dilatation_line_width = kwargs.get('dilatation_line_width', 48)
 
     H, W = img.shape[:2]
@@ -126,14 +126,42 @@ def get_line_bboxes(img: cv2.Mat, **kwargs) -> list:
             line_contours.append((c, y))
     
     line_contours.sort(key=lambda x: x[1])
+    contours = [c for c, _ in line_contours]
+
+    if len(contours) == 0:
+        return []
+
+    lines = []
+    current_line = [contours[0]]
+
+    for c in contours[1:]:
+        _, y_prev, _, h_prev = cv2.boundingRect(current_line[-1])
+        _, y, _, h = cv2.boundingRect(c)
+        by_prev = y_prev + h_prev
+        bbox_dist = y - by_prev
+        if bbox_dist < 6:
+            current_line.append(c)
+        else:
+            lines.append(current_line)
+            current_line = [c]
+
+    lines.append(current_line)
 
     line_bboxes = []
-    for i, (contour, _) in enumerate(line_contours):
-        x, y, w, h = cv2.boundingRect(contour)
-        l = x - 2 if x > 1 else x
-        r = x + w + 2 if x + w < W - 2 else x + w
-        t = y - 2 if y > 1 else y
-        b = y + h + 2 if y + h < H - 2 else y + h
+    for line in lines:
+        points = np.vstack(line).reshape(-1, 2)
+        l = np.min(points[:, 0])
+        r = np.max(points[:, 0])
+        t = np.min(points[:, 1])
+        b = np.max(points[:, 1])
+        if l > 1:
+            l -= 2
+        if r < W - 2:
+            r += 2
+        if t > 1:
+            t -= 2
+        if b < H - 2:
+            b += 2
         line_bboxes.append((t, b, l, r))
 
     return line_bboxes
