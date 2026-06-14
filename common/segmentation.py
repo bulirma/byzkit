@@ -1,23 +1,14 @@
 import cv2
 import numpy as np
 
-import colorsys
-from enum import Enum
 import math
+import os
+import sys
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-class Color(Enum):
-    BLACK = 0
-    RED = 1
+from common import Color, get_color
 
-
-def get_color(r: int, g: int, b: int) -> Color:
-    r, g, b = [c / 255 for c in (r, g, b)]
-    h, s, v = colorsys.rgb_to_hsv(r, g, b)
-    h_deg = h * 360
-    if (h_deg <= 20 or h_deg >= 340) and s > 0.2:
-        return Color.RED
-    return Color.BLACK
 
 def get_contour_color(contour: np.ndarray, img: np.ndarray) -> Color:
     x, y, w, h = cv2.boundingRect(contour)

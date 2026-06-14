@@ -3,11 +3,17 @@ from matplotlib import pyplot as plt
 import numpy as np
 import torch
 
+import colorsys
+from enum import Enum
 import math
 import os
 from typing import Union, List
 import shutil
 
+
+class Color(Enum):
+    BLACK = 0
+    RED = 1
 
 class Distrubution:
     def __init__(self, denominator: int, distribution: dict = None):
@@ -44,6 +50,14 @@ class Distrubution:
             dist[key] = cum_val
         return dist
 
+
+def get_color(r: int, g: int, b: int) -> Color:
+    r, g, b = [c / 255 for c in (r, g, b)]
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    h_deg = h * 360
+    if (h_deg <= 20 or h_deg >= 340) and s > 0.2:
+        return Color.RED
+    return Color.BLACK
 
 def plt_show(img: Union[cv2.Mat, np.ndarray, torch.Tensor], title: str = None):
     plt.imshow(img)
