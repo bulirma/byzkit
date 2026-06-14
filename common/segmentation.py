@@ -1,30 +1,64 @@
 import cv2
 import numpy as np
 
+import colorsys
+from enum import Enum
 import math
 
 
-def contour_distance(contour0: np.ndarray, contour1: np.ndarray) -> float:
+class Color(Enum):
+    BLACK = 0
+    RED = 1
+
+
+def get_color(r: int, g: int, b: int) -> Color:
+    r, g, b = [c / 255 for c in (r, g, b)]
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    h_deg = h * 360
+    if (h_deg <= 20 or h_deg >= 340) and s > 0.2:
+        return Color.RED
+    return Color.BLACK
+
+def get_contour_color(contour: np.ndarray, img: np.ndarray) -> Color:
+    x, y, w, h = cv2.boundingRect(contour)
+
+    mask = np.zeros(img.shape[:2], dtype=np.uint8)
+    cv2.drawContours(mask, [contour], -1, 255, thickness=cv2.FILLED)
+
+    roi_mask = mask[y: y + h, x: x + w]
+    roi_img = img[y: y + h, x: x + w]
+
+    mean_color = cv2.mean(roi_img, mask=roi_mask)[:3]
+    b, g, r = mean_color
+    return get_color(r, g, b)
+
+def get_contour_distance(contour0: np.ndarray, contour1: np.ndarray) -> float:
     pts0 = contour0[:, 0, :]
     pts1 = contour1[:, 0, :]
 
-    rightmost_pt0 = pts0[pts0[:, 0].argmax()]
-    leftmost_pt1 = pts1[pts1[:, 0].argmin()]
+    rightmost_x = pts0[:, 0].max()
+    leftmost_x = pts1[:, 0].min()
+    rightmost_pts0 = pts0[pts0[:, 0] == rightmost_x]
+    leftmost_pts1 = pts1[pts1[:, 0] == leftmost_x]
 
-    x0, y0 = rightmost_pt0
-    x1, y1 = leftmost_pt1
+    min_dist = math.inf
+    for pt0 in rightmost_pts0:
+        for pt1 in leftmost_pts1:
+            x = pt1[0] - pt0[0]
+            y = pt0[1] - pt1[1]
+            dist = math.sqrt(x ** 2 + y ** 2)
+            if dist < min_dist:
+                min_dist = dist
 
-    x = x1 - x0
-    y = abs(y0 - y1)
-    return math.sqrt(x ** 2 + y ** 2)
+    return min_dist
 
-def neume_x_bounds(img: cv2.Mat) -> list:
+def get_neume_x_bounds(img: cv2.Mat) -> list:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-    closing_kernel = np.ones((2, 6), np.uint8)
+    closing_kernel = np.ones((20, 2), np.uint8)
     closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, closing_kernel)
-    dilatation_kernel = np.ones((1, 4), np.uint8)
+    dilatation_kernel = np.ones((12, 1), np.uint8)
     dilated = cv2.dilate(closed, dilatation_kernel, iterations=1)
     contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -38,16 +72,32 @@ def neume_x_bounds(img: cv2.Mat) -> list:
     current_neume = [contours[0]]
 
     for c in contours[1:]:
+        color_prev = get_contour_color(current_neume[-1], img)
+        color = get_contour_color(c, img)
         x_prev, _, w_prev, _ = cv2.boundingRect(current_neume[-1])
-        x, _, _, _ = cv2.boundingRect(c)
+        x, _, w, _ = cv2.boundingRect(c)
         rx_prev = x_prev + w_prev
         bbox_dist = x - rx_prev
-        dist = contour_distance(current_neume[-1], c)
-        if bbox_dist < 4 or dist < 8 or (bbox_dist < 8 and dist < 14):
-            current_neume.append(c)
+        dist = get_contour_distance(current_neume[-1], c)
+
+        if color_prev == color == Color.RED and bbox_dist < 9:
+            new = False
+        elif color_prev != color:
+            new = True
+        elif bbox_dist < 0:
+            new = False
+        elif bbox_dist < 4 and dist > 32:
+            new = True
+        elif bbox_dist < 4 or dist < 8 or (bbox_dist < 8 and dist < 14):
+            new = False
         else:
+            new = True
+        if new:
             neumes.append(current_neume)
             current_neume = [c]
+        else:
+            current_neume.append(c)
+            
     neumes.append(current_neume)
 
     bounds = []
@@ -60,17 +110,19 @@ def neume_x_bounds(img: cv2.Mat) -> list:
     return bounds
 
 def get_line_bboxes(img: cv2.Mat, **kwargs) -> list:
-    closing_line_height = kwargs.get('closing_line_height', 32)
-    dilatation_line_height = kwargs.get('dilatation_line_height', 12)
+    closing_line_height = kwargs.get('closing_line_height', 64)
+    closing_line_width = kwargs.get('closing_line_width', 240)
+    dilatation_line_height = kwargs.get('dilatation_line_height', 32)
+    dilatation_line_width = kwargs.get('dilatation_line_width', 48)
 
     H, W = img.shape[:2]
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     
-    closing_kernel = np.ones((closing_line_height, 184), np.uint8)
+    closing_kernel = np.ones((closing_line_height, closing_line_width), np.uint8)
     closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, closing_kernel)
-    dilatation_kernel = np.ones((dilatation_line_height, 16), np.uint8)
+    dilatation_kernel = np.ones((dilatation_line_height, dilatation_line_width), np.uint8)
     dilated = cv2.dilate(closed, dilatation_kernel, iterations=1)
     closed = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, closing_kernel)
     contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -116,14 +168,14 @@ def get_color_bbox(img: cv2.Mat, color: tuple) -> tuple:
 
 def get_neume_images(line_img: cv2.Mat) -> list:
     imgs = []
-    neume_bounds = neume_x_bounds(line_img)
+    neume_bounds = get_neume_x_bounds(line_img)
     for l, r in neume_bounds:
-        neume_img = line_img[:, l - 1: r + 2]
+        neume_img = line_img[:, l: r + 1]
         imgs.append(neume_img)
     return imgs
 
 def count_neume_images(line_img: cv2.Mat) -> int:
-    return len(neume_x_bounds(line_img))
+    return len(get_neume_x_bounds(line_img))
 
 def get_line_images_with_neume_count(img: cv2.Mat) -> (list, list):
     line_imgs = get_line_images(img)

@@ -205,7 +205,7 @@ def gen_page_image(outdir_path: str, neume_generator: NeumeGenerator, min_neumes
         for l in range(LINES_PER_PAGE):
             for _ in range(np.random.randint(min_neumes_per_line, MAX_NEUMES_PER_LINE + 1)):
                 font, neume = neume_generator.next()
-                tex_file.write(f'\\{font + neume} \\allowbreak{os.linesep}')
+                tex_file.write(f'\\{font}{neume} \\allowbreak{os.linesep}')
                 label_file.write(f'{neume}{os.linesep}')
             tex_file.write(f'\\newline{os.linesep}')
         tex_file.write(os.linesep)
