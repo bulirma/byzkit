@@ -1,16 +1,16 @@
 #!/bin/bash
 
 #PBS -N byz-ds
-#PBS -l select=1:ncpus=64:mem=144gb:scratch_local=12gb
+#PBS -l select=1:ncpus=64:mem=72gb:scratch_local=18gb
 #PBS -l walltime=12:00:00
-#PBS -o job_logs/ds_1200.out.txt
-#PBS -e job_logs/ds_1200.err.txt
+#PBS -o job_logs/ds_2k.out.txt
+#PBS -e job_logs/ds_2k.err.txt
 #PBS -m ae
 #PBS -V
 
 DATADIR="___currentdir___"
 
-unzip -d "$SCRATCHDIR" "$DATADIR/dsp1200.zip"
+unzip -d "$SCRATCHDIR" "$DATADIR/dsp2k.zip"
 cp -r "$DATADIR/byztex" "$SCRATCHDIR"
 cp -r "$DATADIR/common" "$SCRATCHDIR"
 cp -r "$DATADIR/dataset" "$SCRATCHDIR"
@@ -18,9 +18,9 @@ cp -r "$DATADIR/dataset" "$SCRATCHDIR"
 cd "$SCRATCHDIR"
 
 . "$DATADIR/venv/bin/activate"
-python dataset/main.py --type line --input dsp1200 --output dsl1200 --augment 16 --workers 64
+python dataset/main.py --type line --input dsp2k --output dsl2k --augment 16 --workers 64
 deactivate
 
-zip -r "$DATADIR/dsl1200.zip" "$SCRATCHDIR/dsl1200"
+zip -r "$DATADIR/dsl2k.zip" "$SCRATCHDIR/dsl2k"
 
 clean_scratch

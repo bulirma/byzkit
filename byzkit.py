@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sys
 
 from dataset.main import main as dataset_main

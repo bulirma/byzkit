@@ -40,6 +40,8 @@ def main(args: argparse.Namespace):
         seed = np.random.randint(np.iinfo(np.uint32).max)
 
     torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
     random.seed(seed)
     np.random.seed(seed)
 
