@@ -21,11 +21,19 @@ from demo.img import symmetric_pad
 from train import SmallCNN, crnn_ctc_model, DEVICE
 
 
-NEUME_IMG_DIR_PATH = os.path.join('byztex', 'named_neume_images')
+NEUME_IMG_DIR_PATH = os.path.join('byztex', 'named_neume_images', 'unordered')
 NEUME_IMG_FILENAMES = list(sorted(os.listdir(NEUME_IMG_DIR_PATH)))
-NEUME_IMGS = [cv2.imread(os.path.join(NEUME_IMG_DIR_PATH, filename)) for filename in NEUME_IMG_FILENAMES]
-NEUME_IMGS_MAX_HEIGHT = max(map(lambda img: img.shape[0], NEUME_IMGS))
-NEUME_IMGS = [symmetric_pad(img, 0, NEUME_IMGS_MAX_HEIGHT, 255) for img in NEUME_IMGS]
+NEUME_IMGS = {
+    filename.split('.')[0]:
+        cv2.imread(os.path.join(NEUME_IMG_DIR_PATH, filename))
+        for filename in NEUME_IMG_FILENAMES
+}
+NEUME_IMGS_MAX_HEIGHT = max(map(lambda img: img.shape[0], NEUME_IMGS.values()))
+NEUME_IMGS = {
+    name:
+        symmetric_pad(NEUME_IMGS[name], 0, NEUME_IMGS_MAX_HEIGHT, 255)
+        for name in NEUME_IMGS
+}
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--dataset', type=str, default=None, help='dataset path')
@@ -39,24 +47,31 @@ def get_label(label: Iterable, label_code_map: list = None):
         return label
     return [label_code_map[i] for i in label]
 
-def get_label_img(label: list):
-    label_neume_imgs = [NEUME_IMGS[i] for i in label]
+def get_label_img(label: list, labels: list):
+    label_neume_imgs = [NEUME_IMGS[labels[i]] for i in label]
     label_img = np.concatenate(label_neume_imgs, axis=1)
     return cv2.cvtColor(label_img, cv2.COLOR_BGR2RGB)
 
-def show_sample(img: cv2.Mat, label: list):
-    label_img = get_label_img(label)
+def show_sample(img: cv2.Mat, label: list, labels: list):
+    label_img = get_label_img(label, labels)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     plt_show_column_grid([label_img, img], ['label', 'image'], 1)
 
-def show_db_sample(txn: lmdb.Transaction, data_db: lmdb._Database, targets_db: lmdb._Database, label_code_map: list, key: bytes):
+def show_db_sample(
+    txn: lmdb.Transaction,
+    data_db: lmdb._Database,
+    targets_db: lmdb._Database,
+    label_code_map: list,
+    labels: list,
+    key: bytes
+):
     value = txn.get(key, db=data_db)
     target = txn.get(key, db=targets_db)
     img = cv2.imdecode(np.frombuffer(value, np.uint8), cv2.IMREAD_UNCHANGED)
     target_buf = io.BytesIO(target)
     label = np.load(target_buf, allow_pickle=False)['target']
     label = get_label(label, label_code_map)
-    show_sample(img, label)
+    show_sample(img, label, labels)
 
 def demo_db_dataset(dataset_path: str, metadata: dict):
     env = lmdb.open(dataset_path, max_dbs=4)
@@ -66,16 +81,19 @@ def demo_db_dataset(dataset_path: str, metadata: dict):
     augmented_targets_db = env.open_db(b'augmented_targets')
 
     label_code_map = metadata['label_code_map']
+    labels = metadata['labels']
 
     with env.begin(write=False) as txn:
 
         def show_raw(key: bytes):
-            nonlocal txn, raw_data_db, raw_targets_db, label_code_map
-            show_db_sample(txn, raw_data_db, raw_targets_db, label_code_map, key)
+            nonlocal txn, raw_data_db, raw_targets_db, label_code_map, labels
+            show_db_sample(txn, raw_data_db, raw_targets_db, label_code_map, labels, key)
 
         def show_augmented(key: bytes):
-            nonlocal txn, augmented_data_db, augmented_targets_db, label_code_map
-            show_db_sample(txn, augmented_data_db, augmented_targets_db, label_code_map, key)
+            nonlocal txn, augmented_data_db, augmented_targets_db, label_code_map, labels
+            show_db_sample(
+                txn, augmented_data_db, augmented_targets_db, label_code_map, labels, key
+            )
 
         show = show_raw
         db_name = 'raw'
@@ -113,20 +131,21 @@ def demo_sdb_dataset(dataset_path: str, metadata: dict):
     test_targets_db = env.open_db(b'test_targets')
 
     label_code_map = metadata['label_code_map']
+    labels = metadata['labels']
 
     with env.begin(write=False) as txn:
 
         def show_train(key: bytes):
-            nonlocal txn, train_data_db, train_targets_db, label_code_map
-            show_db_sample(txn, train_data_db, train_targets_db, label_code_map, key)
+            nonlocal txn, train_data_db, train_targets_db, label_code_map, labels
+            show_db_sample(txn, train_data_db, train_targets_db, label_code_map, labels, key)
 
         def show_val(key: bytes):
-            nonlocal txn, val_data_db, val_targets_db, label_code_map
-            show_db_sample(txn, val_data_db, val_targets_db, label_code_map, key)
+            nonlocal txn, val_data_db, val_targets_db, label_code_map, labels
+            show_db_sample(txn, val_data_db, val_targets_db, label_code_map, labels, key)
 
         def show_test(key: bytes):
-            nonlocal txn, test_data_db, test_targets_db, label_code_map
-            show_db_sample(txn, test_data_db, test_targets_db, label_code_map, key)
+            nonlocal txn, test_data_db, test_targets_db, label_code_map, labels
+            show_db_sample(txn, test_data_db, test_targets_db, label_code_map, labels, key)
 
         show = show_train
         db_name = 'train'
@@ -168,7 +187,8 @@ def load_model(model_path: str):
         npz = np.load(f, allow_pickle=False)
         state_dict = { k: torch.from_numpy(npz[k]).to(DEVICE) for k in npz.keys() }
 
-    classes = len(dataset_metadata['labels']) if dataset_metadata['label_code_map'] is None else len(dataset_metadata['label_code_map'])
+    classes = len(dataset_metadata['labels']) if dataset_metadata['label_code_map'] is None \
+        else len(dataset_metadata['label_code_map'])
     learning_rate = hyperparams['learning_rate']
     weight_decay = hyperparams['weight_decay']
     epochs = hyperparams['epochs']
@@ -221,6 +241,7 @@ def demo_model(model_path: str):
     dataset_metadata = metadata['dataset_metadata']
     image_height = dataset_metadata['sample_image_max_height']
     label_code_map = dataset_metadata['label_code_map']
+    labels = dataset_metadata['labels']
 
     def predict_img(img: np.ndarray):
         nonlocal image_height, label_code_map, transform
@@ -237,7 +258,7 @@ def demo_model(model_path: str):
         if result.size(0) == 0:
             return np.zeros((0, 0, 3), dtype=np.uint8)
         predicted_label = get_label(result.tolist(), label_code_map)
-        return get_label_img(predicted_label)
+        return get_label_img(predicted_label, labels)
 
     run_draw(predict_img)
 

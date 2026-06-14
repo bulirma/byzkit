@@ -10,7 +10,14 @@ import random
 
 
 class SplitDataset(Dataset):
-    def __init__(self, lmdb_env: lmdb.Environment, metadata: dict, db_prefix: str, transform=None, seed: int = None):
+    def __init__(
+        self,
+        lmdb_env: lmdb.Environment,
+        metadata: dict,
+        db_prefix: str,
+        transform=None,
+        seed: int = None
+    ):
         random.seed(seed)
         super().__init__()
         self.env = lmdb_env

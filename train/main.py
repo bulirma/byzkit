@@ -70,11 +70,17 @@ def main(args: argparse.Namespace):
     val_dataset = SplitDataset(env, dataset_metadata, 'val', transform)
     test_dataset = SplitDataset(env, dataset_metadata, 'test', transform)
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate)
+    train_loader = DataLoader(
+        train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate
+    )
     if len(val_dataset) > 0:
-        val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
+        val_loader = DataLoader(
+            val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate
+        )
     if len(test_dataset) > 0:
-        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate)
+        test_loader = DataLoader(
+            test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate
+        )
 
     if is_existing_dir(args.model):
         empty_dir(args.model)
@@ -90,7 +96,9 @@ def main(args: argparse.Namespace):
     logger.addHandler(file_handler)
     logger.addHandler(stdout_handler)
 
-    model = models.crnn_ctc_model(models.SmallCNN, num_classes, args.epochs, learning_rate, weight_decay, max_heihgt)
+    model = models.crnn_ctc_model(
+        models.SmallCNN, num_classes, args.epochs, learning_rate, weight_decay, max_heihgt
+    )
     model.set_logger(logger)
     hyperparams = {
         'cnn_model': 'small',

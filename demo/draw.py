@@ -46,7 +46,7 @@ class PixelCanvas:
     def _paint(self, x: int, y: int):
         rx0, ry0, rx1, ry1 = self._get_rect(x, y)
         color = self._palette[self.palette_idx]
-        self.canvas.create_rectangle(rx0, ry0, rx1, ry1, fill=color, outline="")
+        self.canvas.create_rectangle(rx0, ry0, rx1, ry1, fill=color, outline='')
 
     def _in_canvas(self, x: int, y: int) -> bool:
         h, w = self.control_image.shape
@@ -89,7 +89,14 @@ class PixelCanvas:
 
 
 class IntSlideEntry:
-    def __init__(self, frame: tk.Frame, min_value: int, max_value: int, default_value: int, change_handler: Callable):
+    def __init__(
+        self,
+        frame: tk.Frame,
+        min_value: int,
+        max_value: int,
+        default_value: int,
+        change_handler: Callable
+    ):
         self.value = tk.IntVar(value=default_value)
         self.min_value = min_value
         self.max_value = max_value
@@ -97,18 +104,25 @@ class IntSlideEntry:
         self.frame = tk.Frame(frame)
         self.pack = self.frame.pack
         self.entry = ttk.Entry(self.frame, textvariable=self.value, width=8)
-        self.slide = ttk.Scale(self.frame, from_=min_value, to=max_value, orient="horizontal", variable=self.value, length=256)
+        self.slide = ttk.Scale(
+            self.frame,
+            from_=min_value,
+            to=max_value,
+            orient='horizontal',
+            variable=self.value,
+            length=256
+        )
         self.slide.pack(side='left', padx=2, fill='x')
         self.entry.pack(side='left', padx=2)
 
         self.change_handler = change_handler
         self.value.trace_add('write', self._on_change)
-        self.entry.bind("<FocusOut>", self._on_focus_out)
-        self.slide.bind("<ButtonRelease-1>", self._on_scale_change)
-        self.slide.bind("<B1-Motion>", self._on_scale_change)  
+        self.entry.bind('<FocusOut>', self._on_focus_out)
+        self.slide.bind('<ButtonRelease-1>', self._on_scale_change)
+        self.slide.bind('<B1-Motion>', self._on_scale_change)  
 
     def _validate(self, text: str) -> bool:
-        if text == "":
+        if text == '':
             return True
         is_negative = text[0] == '-'
         if is_negative:
@@ -125,7 +139,7 @@ class IntSlideEntry:
         self.slide.set(value)
 
     def _on_focus_out(self):
-        if self.entry.get() == "":
+        if self.entry.get() == '':
             self.entry.insert(0, str(self.value.get()))
 
     def _on_change(self, *args):

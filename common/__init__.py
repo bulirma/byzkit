@@ -93,7 +93,11 @@ def plt_show_grid(imgs: List[Union[cv2.Mat, np.ndarray, torch.Tensor]], titles: 
     rows = int(np.ceil(n / cols))
     plt_show_mult(imgs, titles, rows, cols, a, padding)
 
-def plt_show_column_grid(imgs: List[Union[cv2.Mat, np.ndarray, torch.Tensor]], titles: List[str], columns: int = 1):
+def plt_show_column_grid(
+    imgs: List[Union[cv2.Mat, np.ndarray, torch.Tensor]],
+    titles: List[str],
+    columns: int = 1
+):
     a = 1
     padding = 0.2
     n = len(imgs)

@@ -59,11 +59,20 @@ class CTCModel(nn.Module):
             for s in seq[1:]:
                 if s != collapsed[-1]:
                     collapsed.append(s)
-            result = torch.tensor([s.item() for s in collapsed if s != self.num_classes], dtype=torch.long)
+            result = torch.tensor(
+                [s.item() for s in collapsed if s != self.num_classes], dtype=torch.long
+            )
             decoded.append(result)
         return decoded
 
-    def symbol_error_rate(self, ser_err: int, ser_total: int, logits: torch.Tensor, targets: torch.Tensor, lengths: torch.Tensor):
+    def symbol_error_rate(
+        self,
+        ser_err: int,
+        ser_total: int,
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+        lengths: torch.Tensor
+    ):
         decoded = self.greedy_decode(logits)
         offset = 0
         for d, l in zip(decoded, lengths):
@@ -105,8 +114,10 @@ class CTCModel(nn.Module):
                 ser_err += e
                 ser_total += t
 
-                loss = None if self.test_loss is None else '{:.4f}'.format(self.test_loss.compute().item())
-                lr = None if self.optimizer is None else '{:.2e}'.format(self.optimizer.param_groups[0]['lr'])
+                loss = None if self.test_loss is None \
+                    else '{:.4f}'.format(self.test_loss.compute().item())
+                lr = None if self.optimizer is None \
+                    else '{:.2e}'.format(self.optimizer.param_groups[0]['lr'])
                 ser = ser_err / ser_total if ser_total > 0 else None
 
                 pbar.set_postfix(loss=loss, lr=lr, ser=ser)
@@ -138,7 +149,8 @@ class CTCModel(nn.Module):
                 ser_total += t
 
                 ser = ser_err / ser_total if ser_total > 0 else None
-                loss = None if self.val_loss is None else f'{self.val_loss.compute().item():.4f}'
+                loss = None if self.val_loss is None \
+                    else f'{self.val_loss.compute().item():.4f}'
 
                 pbar.set_postfix(loss=loss, ser=ser)
 
@@ -168,8 +180,11 @@ class CTCModel(nn.Module):
 
                     log = {
                         **log,
-                        'Validation loss': self.val_loss.compute().item() if self.val_loss is not None else None,
-                        'Validation symbol error rate': ser_err / ser_total if ser_total > 0 else None
+                        'Validation loss':
+                            self.val_loss.compute().item() if self.val_loss is not None
+                            else None,
+                        'Validation symbol error rate':
+                            ser_err / ser_total if ser_total > 0 else None
                     }
 
                 if self.logger is not None:
@@ -335,7 +350,13 @@ def crnn_ctc_model(
     in_dim = c * height
     rnn_hidden = 512
     rnn_layers = 2
-    rnn = nn.LSTM(input_size=in_dim, hidden_size=rnn_hidden, num_layers=rnn_layers, batch_first=False, bidirectional=True)
+    rnn = nn.LSTM(
+        input_size=in_dim,
+        hidden_size=rnn_hidden,
+        num_layers=rnn_layers,
+        batch_first=False,
+        bidirectional=True
+    )
     linear = nn.Linear(rnn_hidden * 2, num_classes + 1)
     model = CTCModel(DEVICE, num_classes, backbone, rnn, linear)
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
