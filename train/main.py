@@ -22,6 +22,7 @@ import train.models as models
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--dataset', default=None, type=str, help='lmdb split dataset')
 argparser.add_argument('--model', default=None, type=str, help='path to save the model to')
+argparser.add_argument('--max_image_height', default=None, type=int, help='maximum image height (default: None)')
 argparser.add_argument('--seed', default=None, type=int, help='randomization seed')
 argparser.add_argument('--epochs', default=20, type=int, help='number of epochs')
 argparser.add_argument('--batch_size', default=100, type=int, help='batch size')
@@ -34,6 +35,11 @@ def main(args: argparse.Namespace):
     if args.model is None:
         print('model path is required', file=sys.stderr)
         return 1
+    if args.max_image_height is not None and args.max_image_height < 0:
+        print('max_image_height must be non-negative', file=sys.stderr)
+        return 1
+
+    max_height = args.max_image_height
 
     seed = args.seed
     if seed is None:
@@ -61,16 +67,17 @@ def main(args: argparse.Namespace):
         num_classes = len(dataset_metadata['labels'])
     else:
         num_classes = len(dataset_metadata['label_code_map'])
-    max_heihgt = dataset_metadata['sample_image_max_height']
 
     transform = transforms.Compose((
         transforms.ToImage(),
         transforms.ToDtype(torch.float32, scale=True)
     ))
 
-    train_dataset = SplitDataset(env, dataset_metadata, 'train', transform)
-    val_dataset = SplitDataset(env, dataset_metadata, 'val', transform)
-    test_dataset = SplitDataset(env, dataset_metadata, 'test', transform)
+    train_dataset = SplitDataset(env, dataset_metadata, 'train', transform, max_height, seed)
+    val_dataset = SplitDataset(env, dataset_metadata, 'val', transform, max_height, seed)
+    test_dataset = SplitDataset(env, dataset_metadata, 'test', transform, max_height, seed)
+
+    max_height = train_dataset.max_height
 
     train_loader = DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate
@@ -99,7 +106,7 @@ def main(args: argparse.Namespace):
     logger.addHandler(stdout_handler)
 
     model = models.crnn_ctc_model(
-        models.SmallCNN, num_classes, args.epochs, learning_rate, weight_decay, max_heihgt
+        models.SmallCNN, num_classes, args.epochs, learning_rate, weight_decay, max_height
     )
     model.set_logger(logger)
     hyperparams = {
