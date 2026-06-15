@@ -3,7 +3,6 @@ import lmdb
 import numpy as np
 import torch
 from torch.nn import functional as F
-import torchvision.transforms.v2 as transforms
 
 import argparse
 import io
@@ -15,10 +14,11 @@ from typing import Iterable
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from common import is_existing_dir, plt_show_column_grid
+from common.img import convert_image, normalize_transform
+from common.prediction import load_model
 from common.segmentation import get_line_images
 from demo.draw import run_draw
 from demo.img import symmetric_pad
-from train import SmallCNN, crnn_ctc_model, DEVICE
 
 
 NEUME_IMG_DIR_PATH = os.path.join('byztex', 'named_neume_images', 'unordered')
@@ -177,43 +177,6 @@ def demo_sdb_dataset(dataset_path: str, metadata: dict):
 
     env.close()
 
-def load_model(model_path: str):
-    with open(os.path.join(model_path, 'metadata.json'), 'r') as f:
-        metadata = json.load(f)
-    dataset_metadata = metadata['dataset_metadata']
-    hyperparams = metadata['hyperparams']
-
-    with open(os.path.join(model_path, 'state.npz'), 'rb') as f:
-        npz = np.load(f, allow_pickle=False)
-        state_dict = { k: torch.from_numpy(npz[k]).to(DEVICE) for k in npz.keys() }
-
-    classes = len(dataset_metadata['labels']) if dataset_metadata['label_code_map'] is None \
-        else len(dataset_metadata['label_code_map'])
-    learning_rate = hyperparams['learning_rate']
-    weight_decay = hyperparams['weight_decay']
-    epochs = hyperparams['epochs']
-    image_height = dataset_metadata['sample_image_max_height']
-
-    model = crnn_ctc_model(SmallCNN, classes, epochs, learning_rate, weight_decay, image_height)
-    model.load_state_dict(state_dict)
-
-    return model, metadata
-
-def convert_image(img: cv2.Mat, height: int):
-    transform = transforms.Compose((
-        transforms.ToImage(),
-        transforms.ToDtype(torch.float32, scale=True)
-    ))
-
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = torch.from_numpy(img).permute(2, 0, 1)
-    img = transform(img)
-    h = height - img.size(1)
-    t = h // 2
-    b = h - t
-    img = F.pad(img, (0, 0, t, b), mode='constant', value=1.0)
-    return img
-
 def demo_image(model_path: str, image_path: str, image_source: str):
     model, metadata = load_model(model_path)
     dataset_metadata = metadata['dataset_metadata']
@@ -232,11 +195,6 @@ def demo_image(model_path: str, image_path: str, image_source: str):
         show_sample(line_img, predicted_label)
 
 def demo_model(model_path: str):
-    transform = transforms.Compose((
-        transforms.ToImage(),
-        transforms.ToDtype(torch.float32, scale=True)
-    ))
-
     model, metadata = load_model(model_path)
     dataset_metadata = metadata['dataset_metadata']
     image_height = dataset_metadata['sample_image_max_height']
@@ -244,9 +202,9 @@ def demo_model(model_path: str):
     labels = dataset_metadata['labels']
 
     def predict_img(img: np.ndarray):
-        nonlocal image_height, label_code_map, transform
+        nonlocal image_height, label_code_map
         img = torch.from_numpy(img).permute(2, 0, 1)
-        img = transform(img)
+        img = normalize_transform(img)
         h = image_height - img.size(1)
         t = h // 2
         b = h - t

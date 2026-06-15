@@ -14,9 +14,10 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from common import is_existing_dir, empty_dir
+from common.img import normalize_transform
+import common.models as models
 from train.dataset import SplitDataset
 from train.img import collate
-import train.models as models
 
 
 argparser = argparse.ArgumentParser()
@@ -68,14 +69,15 @@ def main(args: argparse.Namespace):
     else:
         num_classes = len(dataset_metadata['label_code_map'])
 
-    transform = transforms.Compose((
-        transforms.ToImage(),
-        transforms.ToDtype(torch.float32, scale=True)
-    ))
-
-    train_dataset = SplitDataset(env, dataset_metadata, 'train', transform, max_height, seed)
-    val_dataset = SplitDataset(env, dataset_metadata, 'val', transform, max_height, seed)
-    test_dataset = SplitDataset(env, dataset_metadata, 'test', transform, max_height, seed)
+    train_dataset = SplitDataset(
+        env, dataset_metadata, 'train', normalize_transform, max_height, seed
+    )
+    val_dataset = SplitDataset(
+        env, dataset_metadata, 'val', normalize_transform, max_height, seed
+    )
+    test_dataset = SplitDataset(
+        env, dataset_metadata, 'test', normalize_transform, max_height, seed
+    )
 
     max_height = train_dataset.max_height
 

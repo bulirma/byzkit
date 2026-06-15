@@ -60,7 +60,7 @@ def get_color(r: int, g: int, b: int) -> Color:
     return Color.BLACK
 
 def plt_show(img: Union[cv2.Mat, np.ndarray, torch.Tensor], title: str = None):
-    plt.imshow(img)
+    plt.imshow(img, cmap='gray')
     if title is not None:
         plt.title(title)
     plt.tight_layout()
@@ -85,7 +85,7 @@ def plt_show_mult(
 
     fig, axes = plt.subplots(rows, cols, figsize=(cols * side, rows * side))
     for i, (ax, img) in enumerate(zip(axes.flatten(), imgs)):
-        ax.imshow(img)
+        ax.imshow(img, cmap='gray')
         ax.axis('off')
         if i < lt and titles[i] is not None:
             ax.set_title(titles[i])

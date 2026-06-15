@@ -14,7 +14,9 @@ from typing import Callable
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from common import levenshtein_distance
-from train.consts import DEVICE
+
+
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class CTCModel(nn.Module):
