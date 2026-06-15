@@ -677,13 +677,23 @@ def run_gen_sdb_dataset(
 
     return input_db_env, sdb_env
 
+def get_db_size(dataset_path: str, pages: int, augmentations: int) -> int:
+    if dataset_path is not None:
+        with open(os.path.join(dataset_path, 'metadata.json'), 'r') as f:
+            metadata = json.load(f)
+
+        pages = metadata['pages']
+        augmentations = metadata['augmentation_multiplier']
+
+    return pages * (1 + augmentations) * LINES_PER_PAGE * 1024 ** 2
+
 
 def main(args):
     are_valid = validate_args(args)
     if not are_valid:
         return 1
 
-    db_size = args.pages * (1 + args.augment) * LINES_PER_PAGE * 1024 ** 2
+    db_size = get_db_size(args.input, args.pages, args.augment)
 
     dataset_path = args.input
 

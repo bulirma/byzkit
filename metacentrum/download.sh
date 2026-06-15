@@ -1,3 +1,3 @@
 #!/bin/sh
 
-rsync -urv "metacentrum:byzkit/$1" ./tmp/
+rsync -urv --progress "metacentrum:byzkit/$1" ./tmp/
