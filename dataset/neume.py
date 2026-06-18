@@ -1,7 +1,7 @@
 import random
 from typing import List
 
-from common import Distrubution
+from common import Distribution
 
 
 FONTS = [
@@ -40,10 +40,10 @@ class NeumeGenerator:
             denom = distribution.pop('denominator')
         else:
             denom = len(values)
-        dist = Distrubution(denom, distribution)
+        dist = Distribution(denom, distribution)
         undef_classes = [c for c in values if c not in distribution]
         dist.make_uniform(undef_classes)
-        cum_dist = dist.make_cumulative()
+        cum_dist = dist.make_cumulative(values)
         return cum_dist
 
     def next(self) -> (str, str):

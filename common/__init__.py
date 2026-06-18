@@ -15,7 +15,7 @@ class Color(Enum):
     BLACK = 0
     RED = 1
 
-class Distrubution:
+class Distribution:
     def __init__(self, denominator: int, distribution: dict = None):
         self.denom = denominator
         self.dist = dict()
@@ -42,11 +42,18 @@ class Distrubution:
                 raise ValueError('the distribution already contains the value')
             self.dist[key] = remainder / self.denom
 
-    def make_cumulative(self) -> dict:
+    def make_cumulative(self, ordered_values: list) -> dict:
+        if len(ordered_values) != len(self.dist):
+            raise ValueError('all the values of the distribution are required')
+        if set(ordered_values) != set(self.dist.keys()):
+            raise ValueError('all the values of the distribution are required')
         dist = dict()
         cum_val = 0
         for key in self.dist:
-            cum_val += self.dist[key]
+            val = self.dist[key]
+            if val == 0:
+                continue
+            cum_val += val
             dist[key] = cum_val
         return dist
 

@@ -2,24 +2,24 @@
 
 #PBS -N byz-ctc
 #PBS -l select=1:ncpus=1:mem=32gb:scratch_local=16gb:ngpus=1:gpu_mem=12gb:gpu_cap=compute_70:cuda_version=13.0
-#PBS -l walltime=18:00:00
-#PBS -o job_logs/train_1200.out.txt
-#PBS -e job_logs/train_1200.err.txt
+#PBS -l walltime=24:00:00
+#PBS -o job_logs/train_2k.out.txt
+#PBS -e job_logs/train_2k.err.txt
 #PBS -m ae
 #PBS -V
 
 DATADIR="___currentdir___"
 
-cp -r "$DATADIR/sds1200.lmdb" "$SCRATCHDIR"
+cp -r "$DATADIR/sds2k.lmdb" "$SCRATCHDIR"
 cp -r "$DATADIR/common" "$SCRATCHDIR"
 cp -r "$DATADIR/train" "$SCRATCHDIR"
 
 cd "$SCRATCHDIR"
 
 . "$DATADIR/venv/bin/activate"
-python train/main.py --dataset sds1200.lmdb --model m1200 --batch_size 64 --epochs 20
+python train/main.py --dataset sds2k.lmdb --model chrysanthos --batch_size 64 --epochs 25
 deactivate
 
-cp -r "$SCRATCHDIR/m1200" "$DATADIR"
+cp -r "$SCRATCHDIR/chrysanthos" "$DATADIR"
 
 clean_scratch

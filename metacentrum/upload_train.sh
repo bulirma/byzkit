@@ -8,5 +8,5 @@ EOF
 rsync -urv --progress --no-relative --files-from=- ./ metacentrum:byzkit/ <<EOF
 metacentrum/prepare_job.sh
 metacentrum/job_train.pbs
-notrack/public/sds1200.lmdb
+notrack/public/sds2k.lmdb
 EOF

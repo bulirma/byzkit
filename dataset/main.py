@@ -90,7 +90,7 @@ def validate_args(args: argparse.Namespace) -> bool:
     if args.distribution is not None and not os.path.exists(args.distribution):
         print('distribution file does not exist', file=sys.stderr)
         return False
-    if args.font_distribution is not None and not os.path.exists(args.distribution):
+    if args.font_distribution is not None and not os.path.exists(args.font_distribution):
         print('font distribution file does not exist', file=sys.stderr)
         return False
     if args.min_neumes_per_line < MIN_NEUMES_PER_LINE or \
@@ -228,6 +228,7 @@ def gen_page_image_dataset(
 ):
     if seed is None:
         seed = np.random.randint(np.iinfo(np.uint32).max)
+    np.random.seed(seed)
 
     print('generating page dataset...')
     generator = NeumeGenerator(distribution, font_distribution, seed=seed)

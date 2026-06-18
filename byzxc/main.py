@@ -15,12 +15,12 @@ from common import is_existing_dir
 
 
 BAR_NEUMES = (
-    'NbarlineSingle',
-    'NbarlineDouble',
-    'NbarlineTheseos',
-    'NbarlineShortSingle',
-    'NbarlineShortDouble',
-    'NbarlineShortTheseos'
+    'barlineSingle',
+    'barlineDouble',
+    'barlineTheseos',
+    'barlineShortSingle',
+    'barlineShortDouble',
+    'barlineShortTheseos'
 )
 
 
