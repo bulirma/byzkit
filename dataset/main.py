@@ -684,7 +684,8 @@ def get_db_size(dataset_path: str, pages: int, augmentations: int) -> int:
             metadata = json.load(f)
 
         pages = metadata['pages']
-        augmentations = metadata['augmentation_multiplier']
+        if 'augmentation_multiplier' in metadata:
+            augmentations = metadata['augmentation_multiplier']
 
     return pages * (1 + augmentations) * LINES_PER_PAGE * 1024 ** 2
 

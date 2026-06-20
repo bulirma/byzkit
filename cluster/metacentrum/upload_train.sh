@@ -2,12 +2,11 @@
 
 rsync -urv --progress --files-from=- ./ metacentrum:byzkit/ <<EOF
 common
-dataset
-byztex/standalone_neumes.txt
+train
 EOF
 
 rsync -urv --progress --no-relative --files-from=- ./ metacentrum:byzkit/ <<EOF
-metacentrum/prepare_job.sh
-metacentrum/job_synth.pbs
-notrack/public/dsp2k.zip
+cluster/metacentrum/prepare_job.sh
+cluster/metacentrum/job_train.pbs
+notrack/public/sds2k.lmdb
 EOF
