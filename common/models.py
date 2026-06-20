@@ -253,7 +253,7 @@ class CTCModel(nn.Module):
 
 def BigCNN() -> tuple:
     def height_collapser(height: int) -> int:
-        return int(((height / 4 - 2) / 2 - 2) / 2)
+        return round(((height / 4 - 2) / 2 - 2) / 2)
 
     return nn.Sequential(
         nn.Conv2d(3, 32, 3, padding=1),
@@ -301,7 +301,7 @@ def BigCNN() -> tuple:
 
 def SmallCNN() -> tuple:
     def height_collapser(height: int) -> int:
-        return int((height / 4 - 1) / 4)
+        return round((height / 4 - 1) / 4)
         
     return nn.Sequential(
         nn.Conv2d(3, 32, 3, padding=1),
