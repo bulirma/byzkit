@@ -1,6 +1,6 @@
 #!/bin/sh
 
-rsync -urv --progress --files-from=- ./ metacentrum:byzkit/ <<EOF
+rsync -urv --progress --exclude '__pycache__/' --files-from=- ./ metacentrum:byzkit/ <<EOF
 common
 dataset
 byztex/standalone_neumes.txt

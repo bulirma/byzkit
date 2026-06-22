@@ -25,7 +25,7 @@ def load_model(model_path: str):
     learning_rate = hyperparams['learning_rate']
     weight_decay = hyperparams['weight_decay']
     epochs = hyperparams['epochs']
-    image_height = dataset_metadata['sample_image_max_height']
+    image_height = hyperparams['image_height']
 
     model = crnn_ctc_model(SmallCNN, classes, epochs, learning_rate, weight_decay, image_height)
     model.load_state_dict(state_dict)

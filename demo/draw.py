@@ -146,7 +146,7 @@ class IntSlideEntry:
         self.change_handler(self.value.get())
 
 
-def run_draw(predict_img: Callable):
+def run_draw(predict_img: Callable, height: int):
     PIXEL = 2
 
     root = tk.Tk()
@@ -159,7 +159,7 @@ def run_draw(predict_img: Callable):
     bottom_frame = ttk.Frame(root)
     bottom_frame.pack(side='top', fill='both')
 
-    canvas = PixelCanvas(mid_frame, 894, 196, PIXEL)
+    canvas = PixelCanvas(mid_frame, 894, height, PIXEL)
     canvas.pack(padx=8, pady=8)
 
     def get_image():

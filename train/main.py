@@ -116,7 +116,8 @@ def main(args: argparse.Namespace):
         'batch_size': args.batch_size,
         'epochs': args.epochs,
         'learning_rate': learning_rate,
-        'weight_decay': weight_decay
+        'weight_decay': weight_decay,
+        'image_height': max_height
     }
 
     print('training...')

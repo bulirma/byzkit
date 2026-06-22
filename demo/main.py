@@ -197,18 +197,22 @@ def demo_image(model_path: str, image_path: str, image_source: str):
 def demo_model(model_path: str):
     model, metadata = load_model(model_path)
     dataset_metadata = metadata['dataset_metadata']
-    image_height = dataset_metadata['sample_image_max_height']
+    image_height = metadata['hyperparams']['image_height']
     label_code_map = dataset_metadata['label_code_map']
     labels = dataset_metadata['labels']
 
     def predict_img(img: np.ndarray):
         nonlocal image_height, label_code_map
+        #if img.shape[0] > image_height:
+        #    ar = image_height / img.shape[0]
+        #    width = round(img.shape[1] * ar)
+        #    img = cv2.resize(img, (width, image_height), interpolation=cv2.INTER_AREA)
         img = torch.from_numpy(img).permute(2, 0, 1)
         img = normalize_transform(img)
-        h = image_height - img.size(1)
-        t = h // 2
-        b = h - t
-        img = F.pad(img, (0, 0, t, b), mode='constant', value=1.0)
+        #h = image_height - img.size(1)
+        #t = h // 2
+        #b = h - t
+        #img = F.pad(img, (0, 0, t, b), mode='constant', value=1.0)
         img = img.unsqueeze(0)
         prediction = model.predict(img)
         decoded = model.greedy_decode(prediction)
@@ -218,7 +222,7 @@ def demo_model(model_path: str):
         predicted_label = get_label(result.tolist(), label_code_map)
         return get_label_img(predicted_label, labels)
 
-    run_draw(predict_img)
+    run_draw(predict_img, image_height)
 
 
 def main(args):
