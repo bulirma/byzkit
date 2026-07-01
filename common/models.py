@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from torchmetrics import MeanMetric
 from tqdm import tqdm
 
+import copy
 from logging import Logger
 import os
 import sys
@@ -30,6 +31,8 @@ class CTCModel(nn.Module):
         self.num_classes = num_classes
 
         self.logger = None
+
+        self.stop_fitting()
 
     def forward(self, x):
         b, c, h, w = x.size()
@@ -85,8 +88,12 @@ class CTCModel(nn.Module):
         return ser_err, ser_total
 
     def get_log_detail(self, data: dict) -> str:
-        details = [f'> {desc}: {val}' for desc, val in data.items()]
-        return os.linesep.join(details)
+        details = [f'> {desc}: {val}' for desc, val in data.items()
+                   if not desc.startswith('_')]
+        msgs = [f'> {msg}' for key, msg in data.items()
+                if key.startswith('_')]
+        lines = details + msgs
+        return os.linesep.join(lines)
 
     def train_step(self, train_loader: DataLoader, epoch: int, epochs: int):
         self.train()
@@ -158,7 +165,44 @@ class CTCModel(nn.Module):
 
         return ser_err, ser_total
 
-    def fit(self, epochs: int, train_loader: DataLoader, val_loader: DataLoader = None):
+    def start_fitting(self):
+        self.fitting = True
+        self.best_error = float('inf')
+        self.best_loss = float('inf')
+        self.bad_epochs = 0
+        self.best_state = None
+
+    def stop_fitting(self):
+        self.fitting = False
+        self.best_error = None
+        self.best_loss = None
+        self.bad_epochs = None
+
+    def check_early_stop(self, error: float, loss: float) -> bool:
+        assert self.fitting
+
+        error_improved = error < self.best_error
+        if error_improved:
+            self.best_error = error
+
+        error_worsened = error > self.best_error + 1e-12
+
+        loss_improved = loss < self.best_loss
+        if loss_improved:
+            self.best_loss = loss
+
+        if error_improved or (loss_improved and not error_worsened):
+            self.best_state = copy.deepcopy(self.state_dict())
+
+        bad_epoch = error_worsened or (not error_improved and not loss_improved)
+        if bad_epoch:
+            self.bad_epochs += 1
+
+        return self.bad_epochs >= 3, bad_epoch
+
+    def fit(self, epochs: int, train_loader: DataLoader, val_loader: DataLoader = None) -> bool:
+        self.start_fitting()
+
         try:
 
             for e in range(1, epochs + 1):
@@ -180,20 +224,38 @@ class CTCModel(nn.Module):
 
                     ser_err, ser_total = self.validate_step(val_loader, e, epochs)
 
+                    loss = self.val_loss.compute().item() if self.val_loss is not None \
+                        else None
+                    error = ser_err / ser_total if ser_total > 0 else None
+
+
                     log = {
                         **log,
-                        'Validation loss':
-                            self.val_loss.compute().item() if self.val_loss is not None
-                            else None,
-                        'Validation symbol error rate':
-                            ser_err / ser_total if ser_total > 0 else None
+                        'Validation loss': loss,
+                        'Validation symbol error rate': error
                     }
+
+                stop = False
+
+                if val_loader is not None and error is not None and loss is not None:
+                    stop, bad = self.check_early_stop(error, loss)
+                    if bad:
+                        log['_improvement'] = 'no improvement'
 
                 if self.logger is not None:
                     detail = self.get_log_detail(log)
                     self.logger.info(f'epoch {e} results:{os.linesep}{detail}')
 
+                if stop:
+                    if self.best_state is not None:
+                        self.load_state_dict(self.best_state)
+                    self.logger.warn('early stopping due to many bad epochs')
+                    self.stop_fitting()
+                    return True
+
                 if val_loader is not None and log['Validation symbol error rate'] < 1e-12:
+                    self.logger.warn('early stopping due to low error')
+                    self.stop_fitting()
                     return True
 
         except:
@@ -201,8 +263,10 @@ class CTCModel(nn.Module):
                 trace = traceback.format_exc()
                 self.logger.error(f'caught an error:{os.linesep}{trace}')
 
+            self.stop_fitting()
             return False
 
+        self.stop_fitting()
         return True
 
     @torch.no_grad()
