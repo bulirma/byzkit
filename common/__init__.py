@@ -49,10 +49,8 @@ class Distribution:
             raise ValueError('all the values of the distribution are required')
         dist = dict()
         cum_val = 0
-        for key in self.dist:
+        for key in ordered_values:
             val = self.dist[key]
-            if val == 0:
-                continue
             cum_val += val
             dist[key] = cum_val
         return dist
